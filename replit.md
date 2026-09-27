@@ -1,9 +1,11 @@
-# [Project name]
+# 新しいPythonプロジェクト
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+標準ライブラリだけで動く、拡張しやすいPython CLIスターターです。
 
 ## Run & Operate
 
+- `cd python-app && PYTHONPATH=src python -m python_app` — CLIを実行
+- `cd python-app && PYTHONPATH=src python -m unittest discover -s tests -v` — Pythonテストを実行
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
@@ -13,6 +15,7 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Stack
 
+- Python 3.11+、標準ライブラリ
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
@@ -22,23 +25,29 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `python-app/pyproject.toml` — Pythonプロジェクト設定とCLIエントリーポイント
+- `python-app/src/python_app/` — アプリケーション本体
+- `python-app/tests/` — 標準ライブラリのunittest
+- `lib/api-spec/openapi.yaml` — API契約のソース
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Pythonコードは`src`レイアウトにして、パッケージの境界を明確にする。
+- 初期実装は標準ライブラリのみとし、用途が決まるまで依存関係を増やさない。
+- 既存のTypeScript APIサーバーとPythonスターターは独立した構成にする。
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- 名前を受け取り、挨拶を表示するCLIの最小サンプル。
+- 通常出力とJSON出力に対応し、後からドメイン処理を追加できる。
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+-
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- 直接実行する場合は`python-app`ディレクトリ内で`PYTHONPATH=src`を指定する。
 
 ## Pointers
 
