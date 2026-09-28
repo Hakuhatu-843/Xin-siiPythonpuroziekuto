@@ -5,6 +5,7 @@
 ## Run & Operate
 
 - `cd python-app && PYTHONPATH=src python -m python_app` — CLIを実行
+- `cd python-app && PYTHONPATH=src python -m python_app.discord_bot` — `DISCORD_TOKEN`でDiscord Botを起動
 - `cd python-app && PYTHONPATH=src python -m unittest discover -s tests -v` — Pythonテストを実行
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
@@ -15,7 +16,7 @@
 
 ## Stack
 
-- Python 3.11+、標準ライブラリ
+- Python 3.11+、`discord.py`
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
@@ -27,6 +28,7 @@
 
 - `python-app/pyproject.toml` — Pythonプロジェクト設定とCLIエントリーポイント
 - `python-app/src/python_app/` — アプリケーション本体
+- `python-app/src/python_app/discord_bot.py` — Replit Secretsからトークンを読むDiscord Bot
 - `python-app/tests/` — 標準ライブラリのunittest
 - `lib/api-spec/openapi.yaml` — API契約のソース
 
@@ -35,11 +37,13 @@
 - Pythonコードは`src`レイアウトにして、パッケージの境界を明確にする。
 - 初期実装は標準ライブラリのみとし、用途が決まるまで依存関係を増やさない。
 - 既存のTypeScript APIサーバーとPythonスターターは独立した構成にする。
+- Discord Botのトークンは`DISCORD_TOKEN`環境変数から実行時に読み込み、トークンをログやエラーメッセージに含めない。
 
 ## Product
 
 - 名前を受け取り、挨拶を表示するCLIの最小サンプル。
 - 通常出力とJSON出力に対応し、後からドメイン処理を追加できる。
+- `/ping`スラッシュコマンドに応答するDiscord Bot。
 
 ## User preferences
 

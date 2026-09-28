@@ -5,13 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "python-app"
 version = "0.1.0"
-description = "A small, extensible Python project starter."
+description = "A small Python project starter with a Discord bot."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "discord.py>=2.7,<3.0",
+]
 
 [project.scripts]
 python-app = "python_app.cli:main"
+python-discord-bot = "python_app.discord_bot:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
