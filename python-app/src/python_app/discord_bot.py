@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Mapping
 
 import discord
-from discord.ext import commands
+from discord import app_commands
 
 TOKEN_ENV_VAR = "DISCORD_TOKEN"
+logger = logging.getLogger(__name__)
 
 
-class PythonAppBot(commands.Bot):
+class PythonAppBot(discord.Client):
     """Bot implementation for the Python App starter."""
+
+    def __init__(self) -> None:
+        super().__init__(intents=discord.Intents.default())
+        self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self) -> None:
         """Sync slash commands once when the bot starts."""
@@ -36,10 +42,21 @@ def get_discord_token(
     return token
 
 
-def create_bot() -> commands.Bot:
+def create_bot() -> PythonAppBot:
     """Create the bot with only the intents needed by its slash commands."""
-    intents = discord.Intents.default()
-    bot = PythonAppBot(command_prefix="!", intents=intents)
+    bot = PythonAppBot()
+
+    @bot.event
+    async def on_ready() -> None:
+        if bot.user is None:
+            logger.info("Discordに接続しました。")
+            return
+
+        logger.info(
+            "Discordに接続しました: %s (ID: %s)",
+            bot.user.name,
+            bot.user.id,
+        )
 
     @bot.tree.command(name="ping", description="Check whether the bot is online.")
     async def ping(interaction: discord.Interaction) -> None:
@@ -50,8 +67,25 @@ def create_bot() -> commands.Bot:
 
 def run_bot(token: str | None = None) -> None:
     """Start the Discord client using the configured token."""
-    bot = create_bot()
-    bot.run(token if token is not None else get_discord_token())
+    resolved_token = token if token is not None else get_discord_token()
+    retry_delay_seconds = 60
+
+    while True:
+        bot = create_bot()
+
+        try:
+            bot.run(resolved_token)
+            return
+        except discord.HTTPException as error:
+            if error.status != 429:
+                raise
+
+            logger.warning(
+                "Discord APIのレート制限中です。%s秒後に再接続します。",
+                retry_delay_seconds,
+            )
+            time.sleep(retry_delay_seconds)
+            retry_delay_seconds = min(retry_delay_seconds * 2, 300)
 
 
 def main() -> None:
