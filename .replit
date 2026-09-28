@@ -24,12 +24,12 @@ args = "Discord Bot"
 name = "Discord Bot"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "console"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "cd python-app && PYTHONPATH=src python -m python_app.discord_bot"
-
-[workflows.workflow.metadata]
-outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"

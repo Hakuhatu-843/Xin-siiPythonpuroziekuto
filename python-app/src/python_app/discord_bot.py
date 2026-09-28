@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from collections.abc import Mapping
 
 import discord
@@ -68,24 +67,8 @@ def create_bot() -> PythonAppBot:
 def run_bot(token: str | None = None) -> None:
     """Start the Discord client using the configured token."""
     resolved_token = token if token is not None else get_discord_token()
-    retry_delay_seconds = 60
-
-    while True:
-        bot = create_bot()
-
-        try:
-            bot.run(resolved_token)
-            return
-        except discord.HTTPException as error:
-            if error.status != 429:
-                raise
-
-            logger.warning(
-                "Discord APIのレート制限中です。%s秒後に再接続します。",
-                retry_delay_seconds,
-            )
-            time.sleep(retry_delay_seconds)
-            retry_delay_seconds = min(retry_delay_seconds * 2, 300)
+    bot = create_bot()
+    bot.run(resolved_token)
 
 
 def main() -> None:
