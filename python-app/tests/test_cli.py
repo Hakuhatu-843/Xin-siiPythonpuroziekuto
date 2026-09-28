@@ -1,7 +1,10 @@
 import json
+import sqlite3
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from python_app.cli import build_greeting, main
 from python_app.discord_bot import (
@@ -11,6 +14,9 @@ from python_app.discord_bot import (
     create_bot,
     format_trade_confirmation,
     get_discord_token,
+    initialize_database,
+    parse_quantity,
+    save_trade,
 )
 
 
@@ -79,6 +85,69 @@ class DiscordBotTests(unittest.TestCase):
         self.assertNotIn("@everyone", confirmation)
         self.assertIn("\\*\\*金\\*\\*", confirmation)
         self.assertIn("通常", confirmation)
+
+    def test_initialize_database_creates_the_trades_table(self) -> None:
+        with TemporaryDirectory() as directory:
+            database_path = Path(directory) / "nested" / "trades.sqlite3"
+
+            initialize_database(database_path)
+
+            with sqlite3.connect(database_path) as connection:
+                table = connection.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'trades'"
+                ).fetchone()
+
+            self.assertEqual(table, ("trades",))
+
+    def test_save_trade_persists_all_requested_fields(self) -> None:
+        with TemporaryDirectory() as directory:
+            database_path = Path(directory) / "trades.sqlite3"
+
+            trade_id = save_trade(
+                character_name="Trade Value",
+                mutation="金",
+                quantity=3,
+                total_amount="1500円",
+                transaction_type="まとめ買い",
+                registered_by_discord_user_id="123456789",
+                registered_at="2026-09-28T00:00:00+00:00",
+                db_path=database_path,
+            )
+
+            with sqlite3.connect(database_path) as connection:
+                row = connection.execute(
+                    """
+                    SELECT character_name, mutation, quantity, total_amount,
+                           transaction_type, registered_at,
+                           registered_by_discord_user_id
+                    FROM trades
+                    WHERE id = ?
+                    """,
+                    (trade_id,),
+                ).fetchone()
+
+            self.assertEqual(
+                row,
+                (
+                    "Trade Value",
+                    "金",
+                    3,
+                    "1500円",
+                    "まとめ買い",
+                    "2026-09-28T00:00:00+00:00",
+                    "123456789",
+                ),
+            )
+
+    def test_parse_quantity_requires_a_positive_integer(self) -> None:
+        self.assertEqual(parse_quantity("3"), 3)
+
+        with self.assertRaises(ValueError):
+            parse_quantity("0")
+
+        with self.assertRaises(ValueError):
+            parse_quantity("three")
 
 
 if __name__ == "__main__":

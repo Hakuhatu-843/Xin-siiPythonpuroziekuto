@@ -29,6 +29,7 @@
 - `python-app/pyproject.toml` — Pythonプロジェクト設定とCLIエントリーポイント
 - `python-app/src/python_app/` — アプリケーション本体
 - `python-app/src/python_app/discord_bot.py` — Replit Secretsからトークンを読むDiscord Bot
+- `python-app/data/trades.sqlite3` — `/trade`の取引記入を保存するSQLiteデータベース（起動時に自動作成）
 - `python-app/tests/` — 標準ライブラリのunittest
 - `lib/api-spec/openapi.yaml` — API契約のソース
 
@@ -45,7 +46,7 @@
 - 名前を受け取り、挨拶を表示するCLIの最小サンプル。
 - 通常出力とJSON出力に対応し、後からドメイン処理を追加できる。
 - `/ping`スラッシュコマンドに応答するDiscord Bot。
-- `/trade`で「取引記入」ボタンを表示し、Modalの入力内容を確認メッセージとして返す。保存処理はまだ行わない。
+- `/trade`で「取引記入」ボタンを表示し、Modalの入力内容をSQLiteへ保存して確認メッセージを返す。相場計算は行わない。
 
 ## User preferences
 

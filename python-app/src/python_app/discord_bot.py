@@ -5,13 +5,96 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
+from datetime import datetime, timezone
+from pathlib import Path
+import sqlite3
 
 import discord
 from discord import app_commands
 
 TOKEN_ENV_VAR = "DISCORD_TOKEN"
 TRANSACTION_TYPES = ("通常", "まとめ買い", "セット")
+DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "trades.sqlite3"
 logger = logging.getLogger(__name__)
+
+
+def initialize_database(db_path: str | Path = DATABASE_PATH) -> None:
+    """Create the SQLite database and trades table when they are missing."""
+    database_path = Path(db_path)
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_name TEXT NOT NULL,
+                mutation TEXT NOT NULL,
+                quantity INTEGER NOT NULL CHECK (quantity > 0),
+                total_amount TEXT NOT NULL,
+                transaction_type TEXT NOT NULL
+                    CHECK (transaction_type IN ('通常', 'まとめ買い', 'セット')),
+                registered_at TEXT NOT NULL,
+                registered_by_discord_user_id TEXT NOT NULL
+            )
+            """
+        )
+
+
+def parse_quantity(value: str) -> int:
+    """Convert the quantity field to a positive integer."""
+    try:
+        quantity = int(value.strip())
+    except ValueError as error:
+        raise ValueError("個数は1以上の整数で入力してください。") from error
+
+    if quantity < 1:
+        raise ValueError("個数は1以上の整数で入力してください。")
+
+    return quantity
+
+
+def save_trade(
+    *,
+    character_name: str,
+    mutation: str,
+    quantity: int,
+    total_amount: str,
+    transaction_type: str,
+    registered_by_discord_user_id: str,
+    db_path: str | Path = DATABASE_PATH,
+    registered_at: str | None = None,
+) -> int:
+    """Persist one trade entry and return its database ID."""
+    initialize_database(db_path)
+    timestamp = registered_at or datetime.now(timezone.utc).isoformat()
+
+    with sqlite3.connect(db_path) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO trades (
+                character_name,
+                mutation,
+                quantity,
+                total_amount,
+                transaction_type,
+                registered_at,
+                registered_by_discord_user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                character_name,
+                mutation,
+                quantity,
+                total_amount,
+                transaction_type,
+                timestamp,
+                registered_by_discord_user_id,
+            ),
+        )
+
+    return int(cursor.lastrowid)
 
 
 def _escape_for_discord(value: str) -> str:
@@ -68,6 +151,10 @@ class TradeEntryModal(discord.ui.Modal, title="取引記入"):
         max_length=20,
     )
 
+    def __init__(self, db_path: str | Path = DATABASE_PATH) -> None:
+        super().__init__()
+        self.db_path = Path(db_path)
+
     async def on_submit(self, interaction: discord.Interaction) -> None:
         transaction_type = str(self.transaction_type.value).strip()
 
@@ -78,11 +165,36 @@ class TradeEntryModal(discord.ui.Modal, title="取引記入"):
             )
             return
 
+        try:
+            quantity = parse_quantity(str(self.quantity.value))
+        except ValueError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+
+        try:
+            save_trade(
+                character_name=str(self.character_name.value).strip(),
+                mutation=str(self.mutation.value).strip(),
+                quantity=quantity,
+                total_amount=str(self.total_amount.value).strip(),
+                transaction_type=transaction_type,
+                registered_by_discord_user_id=str(interaction.user.id),
+                db_path=self.db_path,
+            )
+        except sqlite3.Error:
+            logger.exception("取引の保存に失敗しました。")
+            await interaction.response.send_message(
+                "取引の保存に失敗しました。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+            return
+
         await interaction.response.send_message(
-            format_trade_confirmation(
+            "取引を保存しました。\n\n"
+            + format_trade_confirmation(
                 str(self.character_name.value).strip(),
                 str(self.mutation.value).strip(),
-                str(self.quantity.value).strip(),
+                str(quantity),
                 str(self.total_amount.value).strip(),
                 transaction_type,
             ),
@@ -173,6 +285,7 @@ def create_bot() -> PythonAppBot:
 
 def run_bot(token: str | None = None) -> None:
     """Start the Discord client using the configured token."""
+    initialize_database()
     resolved_token = token if token is not None else get_discord_token()
     bot = create_bot()
     bot.run(resolved_token)
