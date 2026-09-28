@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
+from urllib.parse import quote
 
 import discord
 from discord import app_commands
@@ -97,6 +98,41 @@ def save_trade(
     return int(cursor.lastrowid)
 
 
+def get_recent_trades(
+    limit: int = 20,
+    db_path: str | Path = DATABASE_PATH,
+) -> list[dict[str, str | int]]:
+    """Read the latest trades without creating or modifying the database."""
+    if limit < 1:
+        return []
+
+    database_path = Path(db_path)
+    if not database_path.exists():
+        return []
+
+    read_only_uri = (
+        f"file:{quote(str(database_path.resolve()), safe='/')}?mode=ro"
+    )
+    with sqlite3.connect(read_only_uri, uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT character_name,
+                   mutation,
+                   quantity,
+                   total_amount,
+                   transaction_type,
+                   registered_at
+            FROM trades
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (min(limit, 20),),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
 def _escape_for_discord(value: str) -> str:
     """Prevent user-entered values from creating mentions or markdown."""
     return discord.utils.escape_mentions(discord.utils.escape_markdown(value))
@@ -120,6 +156,36 @@ def format_trade_confirmation(
             f"**取引タイプ**: {_escape_for_discord(transaction_type)}",
         ]
     )
+
+
+def format_recent_trades(
+    trades: list[dict[str, str | int]],
+) -> discord.Embed:
+    """Format recent trades for a Discord embed."""
+    embed = discord.Embed(title="最新の取引データ", color=discord.Color.blurple())
+
+    if not trades:
+        embed.description = "保存されている取引データはありません。"
+        return embed
+
+    for index, trade in enumerate(trades, start=1):
+        character_name = _escape_for_discord(str(trade["character_name"]))[:80]
+        value = "\n".join(
+            [
+                f"**変異**: {_escape_for_discord(str(trade['mutation']))[:80]}",
+                f"**個数**: {_escape_for_discord(str(trade['quantity']))}",
+                f"**合計金額**: {_escape_for_discord(str(trade['total_amount']))[:40]}",
+                f"**取引タイプ**: {_escape_for_discord(str(trade['transaction_type']))}",
+                f"**登録日時**: {_escape_for_discord(str(trade['registered_at']))[:40]}",
+            ]
+        )
+        embed.add_field(
+            name=f"{index}. {character_name}",
+            value=value,
+            inline=False,
+        )
+
+    return embed
 
 
 class TradeEntryModal(discord.ui.Modal, title="取引記入"):
@@ -278,6 +344,26 @@ def create_bot() -> PythonAppBot:
         await interaction.response.send_message(
             "取引内容を入力する場合は、下のボタンを押してください。",
             view=TradeEntryView(),
+        )
+
+    @bot.tree.command(
+        name="trades",
+        description="最新20件の取引データを表示します。",
+    )
+    async def trades(interaction: discord.Interaction) -> None:
+        try:
+            recent_trades = get_recent_trades()
+        except sqlite3.Error:
+            logger.exception("取引データの読み込みに失敗しました。")
+            await interaction.response.send_message(
+                "取引データを読み込めませんでした。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=format_recent_trades(recent_trades),
+            ephemeral=True,
         )
 
     return bot

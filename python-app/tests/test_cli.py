@@ -13,7 +13,9 @@ from python_app.discord_bot import (
     TradeEntryView,
     create_bot,
     format_trade_confirmation,
+    format_recent_trades,
     get_discord_token,
+    get_recent_trades,
     initialize_database,
     parse_quantity,
     save_trade,
@@ -53,6 +55,7 @@ class DiscordBotTests(unittest.TestCase):
 
         self.assertIsNotNone(bot.tree.get_command("ping"))
         self.assertIsNotNone(bot.tree.get_command("trade"))
+        self.assertIsNotNone(bot.tree.get_command("trades"))
         self.assertFalse(bot.intents.message_content)
 
     def test_trade_view_has_a_persistent_button(self) -> None:
@@ -139,6 +142,55 @@ class DiscordBotTests(unittest.TestCase):
                     "123456789",
                 ),
             )
+
+    def test_get_recent_trades_returns_latest_twenty_without_writing(self) -> None:
+        with TemporaryDirectory() as directory:
+            database_path = Path(directory) / "trades.sqlite3"
+            initialize_database(database_path)
+
+            for index in range(1, 23):
+                save_trade(
+                    character_name=f"Character {index}",
+                    mutation="通常",
+                    quantity=index,
+                    total_amount=f"{index * 100}円",
+                    transaction_type="通常",
+                    registered_by_discord_user_id=str(index),
+                    registered_at=f"2026-09-28T00:00:{index:02d}+00:00",
+                    db_path=database_path,
+                )
+
+            recent_trades = get_recent_trades(db_path=database_path)
+
+            self.assertEqual(len(recent_trades), 20)
+            self.assertEqual(recent_trades[0]["character_name"], "Character 22")
+            self.assertEqual(recent_trades[-1]["character_name"], "Character 3")
+
+    def test_get_recent_trades_does_not_create_a_missing_database(self) -> None:
+        with TemporaryDirectory() as directory:
+            database_path = Path(directory) / "missing.sqlite3"
+
+            self.assertEqual(get_recent_trades(db_path=database_path), [])
+            self.assertFalse(database_path.exists())
+
+    def test_format_recent_trades_displays_requested_fields(self) -> None:
+        embed = format_recent_trades(
+            [
+                {
+                    "character_name": "Trade Value",
+                    "mutation": "金",
+                    "quantity": 3,
+                    "total_amount": "1500円",
+                    "transaction_type": "まとめ買い",
+                    "registered_at": "2026-09-28T00:00:00+00:00",
+                }
+            ]
+        )
+
+        self.assertEqual(embed.title, "最新の取引データ")
+        self.assertEqual(len(embed.fields), 1)
+        self.assertIn("変異", embed.fields[0].value)
+        self.assertIn("登録日時", embed.fields[0].value)
 
     def test_parse_quantity_requires_a_positive_integer(self) -> None:
         self.assertEqual(parse_quantity("3"), 3)
