@@ -1,0 +1,1 @@
+- [Discord API rate limits](discord-api-rate-limits.md) — Replit workflows may receive Discord global 429s; keep token-safe exponential backoff and avoid treating it as an invalid token.
