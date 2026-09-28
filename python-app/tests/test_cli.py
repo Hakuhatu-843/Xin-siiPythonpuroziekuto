@@ -4,7 +4,14 @@ from contextlib import redirect_stdout
 from io import StringIO
 
 from python_app.cli import build_greeting, main
-from python_app.discord_bot import create_bot, get_discord_token
+from python_app.discord_bot import (
+    TRANSACTION_TYPES,
+    TradeEntryModal,
+    TradeEntryView,
+    create_bot,
+    format_trade_confirmation,
+    get_discord_token,
+)
 
 
 class GreetingTests(unittest.TestCase):
@@ -39,7 +46,39 @@ class DiscordBotTests(unittest.TestCase):
         bot = create_bot()
 
         self.assertIsNotNone(bot.tree.get_command("ping"))
+        self.assertIsNotNone(bot.tree.get_command("trade"))
         self.assertFalse(bot.intents.message_content)
+
+    def test_trade_view_has_a_persistent_button(self) -> None:
+        view = TradeEntryView()
+
+        self.assertIsNone(view.timeout)
+        self.assertEqual(len(view.children), 1)
+        self.assertEqual(view.children[0].label, "取引記入")
+
+    def test_trade_modal_has_five_fields(self) -> None:
+        modal = TradeEntryModal()
+
+        self.assertEqual(modal.title, "取引記入")
+        self.assertEqual(len(modal.children), 5)
+        self.assertEqual(
+            [child.label for child in modal.children],
+            ["キャラ名", "変異", "個数", "合計金額", "取引タイプ"],
+        )
+
+    def test_trade_confirmation_escapes_user_input(self) -> None:
+        confirmation = format_trade_confirmation(
+            "A @everyone",
+            "**金**",
+            "2",
+            "1,000円",
+            TRANSACTION_TYPES[0],
+        )
+
+        self.assertIn("A @", confirmation)
+        self.assertNotIn("@everyone", confirmation)
+        self.assertIn("\\*\\*金\\*\\*", confirmation)
+        self.assertIn("通常", confirmation)
 
 
 if __name__ == "__main__":
