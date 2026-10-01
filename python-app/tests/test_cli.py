@@ -74,6 +74,7 @@ class DiscordBotTests(unittest.TestCase):
             [child.label for child in modal.children],
             ["キャラ名", "変異", "個数", "合計金額", "取引タイプ"],
         )
+        self.assertEqual(modal.children[3].placeholder, "例: 1.5k")
 
     def test_trade_confirmation_escapes_user_input(self) -> None:
         confirmation = format_trade_confirmation(

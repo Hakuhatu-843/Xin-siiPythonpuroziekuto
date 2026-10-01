@@ -208,7 +208,7 @@ class TradeEntryModal(discord.ui.Modal, title="取引記入"):
     )
     total_amount = discord.ui.TextInput(
         label="合計金額",
-        placeholder="例: 1500円",
+        placeholder="例: 1.5k",
         max_length=50,
     )
     transaction_type = discord.ui.TextInput(
@@ -286,6 +286,19 @@ class TradeEntryView(discord.ui.View):
     ) -> None:
         await interaction.response.send_modal(TradeEntryModal())
 
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item[discord.ui.View],
+    ) -> None:
+        logger.error("取引記入ボタンの処理に失敗しました。", exc_info=True)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "取引記入フォームを開けませんでした。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+
 
 class PythonAppBot(discord.Client):
     """Bot implementation for the Python App starter."""
@@ -341,6 +354,7 @@ def create_bot() -> PythonAppBot:
         description="取引記入ボタンを表示します。",
     )
     async def trade(interaction: discord.Interaction) -> None:
+        logger.info("/tradeを受信しました。")
         await interaction.response.send_message(
             "取引内容を入力する場合は、下のボタンを押してください。",
             view=TradeEntryView(),
@@ -365,6 +379,21 @@ def create_bot() -> PythonAppBot:
             embed=format_recent_trades(recent_trades),
             ephemeral=True,
         )
+
+    @bot.tree.error
+    async def on_app_command_error(
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ) -> None:
+        logger.error("スラッシュコマンドの処理に失敗しました。", exc_info=True)
+        message = (
+            "コマンドの実行中にエラーが発生しました。"
+            "Botの権限を確認して、もう一度お試しください。"
+        )
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
 
     return bot
 
