@@ -219,7 +219,7 @@ def load_verified_character_observations(
         if quantity <= 0 or total_amount < 0:
             continue
 
-        observations.append(
+                observations.append(
             PriceObservation(
                 character_name=stored_name,
                 level=level,
@@ -228,7 +228,12 @@ def load_verified_character_observations(
                     quantity,
                 ),
             )
-            def calculate_mutation_multiplier(
+        )
+
+    return observations
+
+
+def calculate_mutation_multiplier(
     normal_price: float,
     mutation_price: float,
 ) -> float:
@@ -239,7 +244,3 @@ def load_verified_character_observations(
         raise ValueError("変異価格は0以上である必要があります。")
 
     return mutation_price / normal_price
-        )
-
-    return observations
-    
