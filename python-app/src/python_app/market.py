@@ -159,7 +159,7 @@ def estimate_level_one_price(
         if quantity <= 0 or total_amount < 0:
             continue
 
-        observations.append(
+                observations.append(
             PriceObservation(
                 character_name=stored_name,
                 level=level,
@@ -171,6 +171,3 @@ def estimate_level_one_price(
         )
 
     return observations
-
-    return observations
-    
