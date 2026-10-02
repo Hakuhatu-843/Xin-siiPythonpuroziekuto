@@ -14,6 +14,23 @@ from urllib.parse import quote
 import discord
 from discord import app_commands
 
+from .character_names import (
+    CharacterNameResolution,
+    UnverifiedNameReview,
+    create_name_review,
+    get_name_review,
+    get_pending_name_reviews,
+    get_unverified_channel,
+    ignore_name_review,
+    initialize_character_name_schema,
+    normalize_character_name,
+    register_canonical_name,
+    register_character_alias,
+    resolve_character_name,
+    set_review_notification_message,
+    set_unverified_channel,
+)
+
 TOKEN_ENV_VAR = "DISCORD_TOKEN"
 TRANSACTION_TYPES = ("通常", "単体", "まとめ買い", "セット")
 DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "trades.sqlite3"
@@ -28,6 +45,7 @@ class TradeCharacter:
     mutation: str
     level: str
     quantity: int
+    is_verified: bool = True
 
 
 def initialize_database(db_path: str | Path = DATABASE_PATH) -> None:
@@ -118,6 +136,7 @@ def initialize_database(db_path: str | Path = DATABASE_PATH) -> None:
             )
             """
         )
+        initialize_character_name_schema(connection)
         connection.commit()
     except Exception:
         connection.rollback()
@@ -158,6 +177,7 @@ def _insert_trade(
     registered_by_discord_user_id: str,
     registered_at: str,
     level: str,
+    is_verified: bool,
     characters: Sequence[TradeCharacter],
 ) -> int:
     cursor = connection.execute(
@@ -170,9 +190,10 @@ def _insert_trade(
             transaction_type,
             registered_at,
             registered_by_discord_user_id,
-            level
+            level,
+            is_verified
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             character_name,
@@ -183,15 +204,17 @@ def _insert_trade(
             registered_at,
             registered_by_discord_user_id,
             level,
+            int(is_verified),
         ),
     )
     trade_id = int(cursor.lastrowid)
     connection.executemany(
         """
         INSERT INTO trade_characters (
-            trade_id, position, character_name, mutation, level, quantity
+            trade_id, position, character_name, mutation, level, quantity,
+            normalized_name, is_verified
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -201,11 +224,70 @@ def _insert_trade(
                 character.mutation,
                 character.level,
                 character.quantity,
+                normalize_character_name(character.character_name),
+                int(character.is_verified),
             )
             for position, character in enumerate(characters, start=1)
         ],
     )
     return trade_id
+
+
+def save_trade_with_reviews(
+    *,
+    character_name: str,
+    mutation: str,
+    quantity: int,
+    total_amount: str,
+    transaction_type: str,
+    registered_by_discord_user_id: str,
+    db_path: str | Path = DATABASE_PATH,
+    registered_at: str | None = None,
+    level: str = "",
+    submitted_by_display_name: str = "",
+) -> tuple[int, list[UnverifiedNameReview]]:
+    """Save one trade and queue an administrator review if its name is unknown."""
+    initialize_database(db_path)
+    timestamp = registered_at or datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        resolution = resolve_character_name(connection, character_name)
+        character = TradeCharacter(
+            character_name=resolution.character_name,
+            mutation=mutation,
+            level=level,
+            quantity=quantity,
+            is_verified=resolution.is_verified,
+        )
+        trade_id = _insert_trade(
+            connection,
+            character_name=resolution.character_name,
+            mutation=mutation,
+            quantity=quantity,
+            total_amount=total_amount,
+            transaction_type=transaction_type,
+            registered_by_discord_user_id=registered_by_discord_user_id,
+            registered_at=timestamp,
+            level=level,
+            is_verified=resolution.is_verified,
+            characters=(character,),
+        )
+
+        reviews = []
+        if not resolution.is_verified:
+            reviews.append(
+                create_name_review(
+                    connection,
+                    trade_id=trade_id,
+                    position=1,
+                    resolution=resolution,
+                    submitted_by_discord_user_id=registered_by_discord_user_id,
+                    submitted_by_display_name=submitted_by_display_name,
+                    submitted_at=timestamp,
+                )
+            )
+
+    return trade_id, reviews
 
 
 def save_trade(
@@ -221,31 +303,81 @@ def save_trade(
     level: str = "",
 ) -> int:
     """Persist one trade entry and return its database ID."""
-    initialize_database(db_path)
-    timestamp = registered_at or datetime.now(timezone.utc).isoformat()
-    character = TradeCharacter(
+    trade_id, _ = save_trade_with_reviews(
         character_name=character_name,
         mutation=mutation,
-        level=level,
         quantity=quantity,
+        total_amount=total_amount,
+        transaction_type=transaction_type,
+        registered_by_discord_user_id=registered_by_discord_user_id,
+        db_path=db_path,
+        registered_at=registered_at,
+        level=level,
     )
+    return trade_id
 
+
+def save_set_trade_with_reviews(
+    *,
+    characters: Sequence[TradeCharacter],
+    total_amount: str,
+    registered_by_discord_user_id: str,
+    db_path: str | Path = DATABASE_PATH,
+    registered_at: str | None = None,
+    submitted_by_display_name: str = "",
+) -> tuple[int, list[UnverifiedNameReview]]:
+    """Save a set and queue a review for each unknown character name."""
+    if not 1 <= len(characters) <= 3:
+        raise ValueError("セットに登録できるキャラは1〜3体です。")
+    if any(character.quantity < 1 for character in characters):
+        raise ValueError("個数は1以上の整数で入力してください。")
+
+    initialize_database(db_path)
+    timestamp = registered_at or datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(db_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
+        resolutions = [
+            resolve_character_name(connection, character.character_name)
+            for character in characters
+        ]
+        resolved_characters = [
+            TradeCharacter(
+                character_name=resolution.character_name,
+                mutation=character.mutation,
+                level=character.level,
+                quantity=character.quantity,
+                is_verified=resolution.is_verified,
+            )
+            for character, resolution in zip(characters, resolutions)
+        ]
         trade_id = _insert_trade(
             connection,
-            character_name=character_name,
-            mutation=mutation,
-            quantity=quantity,
+            character_name=f"セット取引（{len(characters)}キャラ）",
+            mutation="—",
+            quantity=sum(character.quantity for character in characters),
             total_amount=total_amount,
-            transaction_type=transaction_type,
+            transaction_type="セット",
             registered_by_discord_user_id=registered_by_discord_user_id,
             registered_at=timestamp,
-            level=level,
-            characters=(character,),
+            level="",
+            is_verified=all(item.is_verified for item in resolved_characters),
+            characters=resolved_characters,
         )
+        reviews = [
+            create_name_review(
+                connection,
+                trade_id=trade_id,
+                position=position,
+                resolution=resolution,
+                submitted_by_discord_user_id=registered_by_discord_user_id,
+                submitted_by_display_name=submitted_by_display_name,
+                submitted_at=timestamp,
+            )
+            for position, resolution in enumerate(resolutions, start=1)
+            if not resolution.is_verified
+        ]
 
-    return trade_id
+    return trade_id, reviews
 
 
 def save_set_trade(
@@ -257,26 +389,112 @@ def save_set_trade(
     registered_at: str | None = None,
 ) -> int:
     """Save a set transaction and its character details without unit prices."""
-    if not 1 <= len(characters) <= 3:
-        raise ValueError("セットに登録できるキャラは1〜3体です。")
-    if any(character.quantity < 1 for character in characters):
-        raise ValueError("個数は1以上の整数で入力してください。")
+    trade_id, _ = save_set_trade_with_reviews(
+        characters=characters,
+        total_amount=total_amount,
+        registered_by_discord_user_id=registered_by_discord_user_id,
+        db_path=db_path,
+        registered_at=registered_at,
+    )
+    return trade_id
 
+
+def get_character_name_review(
+    review_id: int,
+    db_path: str | Path = DATABASE_PATH,
+) -> UnverifiedNameReview | None:
     initialize_database(db_path)
-    timestamp = registered_at or datetime.now(timezone.utc).isoformat()
     with sqlite3.connect(db_path) as connection:
-        connection.execute("PRAGMA foreign_keys = ON")
-        return _insert_trade(
+        return get_name_review(connection, review_id)
+
+
+def get_pending_character_name_reviews(
+    db_path: str | Path = DATABASE_PATH,
+    *,
+    notification_missing: bool = False,
+) -> list[UnverifiedNameReview]:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        return get_pending_name_reviews(
             connection,
-            character_name=f"セット取引（{len(characters)}キャラ）",
-            mutation="—",
-            quantity=sum(character.quantity for character in characters),
-            total_amount=total_amount,
-            transaction_type="セット",
-            registered_by_discord_user_id=registered_by_discord_user_id,
-            registered_at=timestamp,
-            level="",
-            characters=characters,
+            notification_missing=notification_missing,
+        )
+
+
+def configure_unverified_name_channel(
+    channel_id: str,
+    db_path: str | Path = DATABASE_PATH,
+) -> None:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        set_unverified_channel(connection, channel_id)
+
+
+def get_configured_unverified_name_channel(
+    db_path: str | Path = DATABASE_PATH,
+) -> str | None:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        return get_unverified_channel(connection)
+
+
+def record_unverified_name_notification(
+    review_id: int,
+    message_id: str,
+    db_path: str | Path = DATABASE_PATH,
+) -> None:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        set_review_notification_message(connection, review_id, message_id)
+
+
+def approve_unverified_name_as_canonical(
+    review_id: int,
+    administrator_id: str,
+    db_path: str | Path = DATABASE_PATH,
+) -> str:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        review = get_name_review(connection, review_id)
+        if review is None or review.status != "pending":
+            raise ValueError("この未確認名はすでに処理されています。")
+        return register_canonical_name(
+            connection,
+            review.input_name,
+            administrator_id,
+        )
+
+
+def approve_unverified_name_as_alias(
+    review_id: int,
+    canonical_name: str,
+    administrator_id: str,
+    db_path: str | Path = DATABASE_PATH,
+) -> str:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        review = get_name_review(connection, review_id)
+        if review is None or review.status != "pending":
+            raise ValueError("この未確認名はすでに処理されています。")
+        return register_character_alias(
+            connection,
+            review.input_name,
+            canonical_name,
+            administrator_id,
+        )
+
+
+def dismiss_unverified_name_review(
+    review_id: int,
+    administrator_id: str,
+    db_path: str | Path = DATABASE_PATH,
+) -> bool:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        return ignore_name_review(
+            connection,
+            review_id,
+            administrator_id,
         )
 
 
@@ -306,6 +524,7 @@ def get_recent_trades(
                    quantity,
                    total_amount,
                    transaction_type,
+                   is_verified,
                    registered_at
             FROM trades
             ORDER BY id DESC
@@ -319,7 +538,7 @@ def get_recent_trades(
             trade = dict(row)
             characters = connection.execute(
                 """
-                SELECT character_name, mutation, level, quantity
+                SELECT character_name, mutation, level, quantity, is_verified
                 FROM trade_characters
                 WHERE trade_id = ?
                 ORDER BY position
@@ -336,6 +555,7 @@ def get_recent_trades(
                         "mutation": trade["mutation"],
                         "level": trade["level"],
                         "quantity": trade["quantity"],
+                        "is_verified": trade["is_verified"],
                     }
                 ]
             trades.append(trade)
@@ -401,16 +621,27 @@ def format_recent_trades(
             mutation = _escape_for_discord(str(character["mutation"]))[:40]
             level = _escape_for_discord(str(character.get("level", "")))[:20]
             quantity = _escape_for_discord(str(character["quantity"]))[:10]
+            character_is_verified = bool(
+                character.get("is_verified", trade.get("is_verified", True))
+            )
             prefix = f"キャラ{character_index}" if transaction_type == "セット" else "キャラ名"
             details = f"{prefix}: {name} / 変異: {mutation}"
             if level:
                 details += f" / レベル: {level}"
             details += f" / 個数: {quantity}"
+            if not character_is_verified:
+                details += " / ⚠ 未確認"
             character_lines.append(details)
 
+        verification_line = (
+            []
+            if bool(trade.get("is_verified", True))
+            else ["⚠ 未確認名あり（相場計算対象外）"]
+        )
         value = "\n".join(
             [
                 *character_lines,
+                *verification_line,
                 f"**合計金額**: {_escape_for_discord(str(trade['total_amount']))[:40]}",
                 f"**取引タイプ**: {_escape_for_discord(transaction_type)}",
                 f"**登録日時**: {_escape_for_discord(str(trade['registered_at']))[:40]}",
@@ -428,6 +659,274 @@ def format_recent_trades(
         )
 
     return embed
+
+
+def _is_guild_administrator(interaction: discord.Interaction) -> bool:
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    return bool(permissions and permissions.administrator)
+
+
+def format_unverified_name_notification(
+    review: UnverifiedNameReview,
+) -> discord.Embed:
+    """Show an unknown name and its submitter without triggering mentions."""
+    embed = discord.Embed(
+        title="未確認のキャラ名",
+        description="この名前を正式名称として登録するか、別名として登録してください。",
+        color=discord.Color.orange(),
+    )
+    input_name = _escape_for_discord(review.input_name)[:200]
+    user_name = (
+        review.submitted_by_display_name
+        or review.submitted_by_discord_user_id
+    )
+    user_value = (
+        f"{_escape_for_discord(user_name)[:100]} "
+        f"(ID: {_escape_for_discord(review.submitted_by_discord_user_id)[:30]})"
+    )
+    embed.add_field(name="入力された名前", value=input_name, inline=False)
+    embed.add_field(name="入力したユーザー", value=user_value, inline=False)
+    embed.add_field(
+        name="登録日時",
+        value=_escape_for_discord(review.submitted_at)[:50],
+        inline=False,
+    )
+    return embed
+
+
+class CharacterAliasModal(discord.ui.Modal, title="入力名を別名として登録"):
+    """Ask an administrator for the canonical name behind an unknown alias."""
+
+    canonical_name = discord.ui.TextInput(
+        label="正式名称",
+        placeholder="例: ケツァルコアトル",
+        max_length=100,
+    )
+
+    def __init__(
+        self,
+        review_id: int,
+        db_path: str | Path = DATABASE_PATH,
+    ) -> None:
+        super().__init__()
+        self.review_id = review_id
+        self.db_path = Path(db_path)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not _is_guild_administrator(interaction):
+            await interaction.response.send_message(
+                "この操作はサーバー管理者のみ実行できます。",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            canonical = approve_unverified_name_as_alias(
+                self.review_id,
+                str(self.canonical_name.value),
+                str(interaction.user.id),
+                db_path=self.db_path,
+            )
+        except ValueError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        except sqlite3.Error:
+            logger.exception("キャラ名の別名登録に失敗しました。")
+            await interaction.followup.send(
+                "別名を登録できませんでした。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(
+            f"「{_escape_for_discord(str(self.canonical_name.value))}」を正式名称として、"
+            f"「{_escape_for_discord(canonical)}」を別名として登録しました。",
+            ephemeral=True,
+        )
+
+
+class UnverifiedNameReviewView(discord.ui.View):
+    """Persistent administrator actions attached to an unknown-name notice."""
+
+    def __init__(
+        self,
+        review_id: int,
+        db_path: str | Path = DATABASE_PATH,
+    ) -> None:
+        super().__init__(timeout=None)
+        self.review_id = review_id
+        self.db_path = Path(db_path)
+
+    async def _require_pending_review(
+        self,
+        interaction: discord.Interaction,
+    ) -> bool:
+        if not _is_guild_administrator(interaction):
+            await interaction.response.send_message(
+                "この操作はサーバー管理者のみ実行できます。",
+                ephemeral=True,
+            )
+            return False
+        review = get_character_name_review(self.review_id, self.db_path)
+        if review is None or review.status != "pending":
+            await interaction.response.send_message(
+                "この未確認名はすでに処理されています。",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(
+        label="正式名称として登録",
+        style=discord.ButtonStyle.success,
+        custom_id="unverified_name:canonical",
+    )
+    async def register_canonical(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[discord.ui.View],
+    ) -> None:
+        if not await self._require_pending_review(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            canonical = approve_unverified_name_as_canonical(
+                self.review_id,
+                str(interaction.user.id),
+                db_path=self.db_path,
+            )
+        except ValueError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        except sqlite3.Error:
+            logger.exception("正式名称の登録に失敗しました。")
+            await interaction.followup.send(
+                "正式名称を登録できませんでした。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(
+            f"「{_escape_for_discord(canonical)}」を正式名称として登録しました。",
+            ephemeral=True,
+        )
+        if interaction.message is not None:
+            await interaction.message.edit(view=None)
+
+    @discord.ui.button(
+        label="入力名を別名として登録",
+        style=discord.ButtonStyle.primary,
+        custom_id="unverified_name:alias",
+    )
+    async def register_alias(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[discord.ui.View],
+    ) -> None:
+        if not await self._require_pending_review(interaction):
+            return
+        await interaction.response.send_modal(
+            CharacterAliasModal(self.review_id, db_path=self.db_path)
+        )
+
+    @discord.ui.button(
+        label="無視",
+        style=discord.ButtonStyle.secondary,
+        custom_id="unverified_name:ignore",
+    )
+    async def ignore(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[discord.ui.View],
+    ) -> None:
+        if not await self._require_pending_review(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            dismissed = dismiss_unverified_name_review(
+                self.review_id,
+                str(interaction.user.id),
+                db_path=self.db_path,
+            )
+        except sqlite3.Error:
+            logger.exception("未確認名の無視処理に失敗しました。")
+            await interaction.followup.send(
+                "未確認名を処理できませんでした。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+            return
+        if not dismissed:
+            await interaction.followup.send(
+                "この未確認名はすでに処理されています。",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(
+            "通知を無視しました。取引データは未確認のまま保存されています。",
+            ephemeral=True,
+        )
+        if interaction.message is not None:
+            await interaction.message.edit(view=None)
+
+
+async def publish_unverified_name_notification(
+    client: discord.Client,
+    review: UnverifiedNameReview,
+    db_path: str | Path = DATABASE_PATH,
+) -> bool:
+    """Send one review notice if its destination has been configured."""
+    if review.status != "pending":
+        return False
+    channel_id = get_configured_unverified_name_channel(db_path)
+    if channel_id is None:
+        logger.warning(
+            "未確認名の通知先が未設定です。/set_unverified_channel を実行してください。"
+        )
+        return False
+
+    try:
+        channel = client.get_channel(int(channel_id))
+        if channel is None:
+            channel = await client.fetch_channel(int(channel_id))
+        send = getattr(channel, "send", None)
+        if send is None:
+            logger.error("設定された通知先はメッセージを送信できるチャンネルではありません。")
+            return False
+        message = await send(
+            embed=format_unverified_name_notification(review),
+            view=UnverifiedNameReviewView(review.id, db_path=db_path),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        record_unverified_name_notification(
+            review.id,
+            str(message.id),
+            db_path=db_path,
+        )
+    except (discord.HTTPException, sqlite3.Error, ValueError):
+        logger.exception("未確認名のDiscord通知に失敗しました。")
+        return False
+    return True
+
+
+async def publish_pending_unverified_name_notifications(
+    client: discord.Client,
+    db_path: str | Path = DATABASE_PATH,
+) -> int:
+    """Publish queued names that have not yet received a Discord message."""
+    try:
+        reviews = get_pending_character_name_reviews(
+            db_path,
+            notification_missing=True,
+        )
+    except sqlite3.Error:
+        logger.exception("未確認名通知の読み込みに失敗しました。")
+        return 0
+
+    sent = 0
+    for review in reviews:
+        if await publish_unverified_name_notification(client, review, db_path):
+            sent += 1
+    return sent
 
 
 class SingleTradeModal(discord.ui.Modal, title="単体・まとめ買い"):
