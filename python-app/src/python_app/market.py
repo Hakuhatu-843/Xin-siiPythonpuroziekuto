@@ -1,1 +1,122 @@
+"""Market price calculation utilities."""
 
+from __future__ import annotations
+
+from dataclasses import dataclass
+from statistics import median
+from typing import Sequence
+
+
+@dataclass(frozen=True)
+class PriceObservation:
+    """One normalized price observation."""
+
+    character_name: str
+    level: int
+    price_per_unit: float
+
+
+@dataclass(frozen=True)
+class MarketEstimate:
+    """Calculated market estimate for one character."""
+
+    character_name: str
+    level: int
+    price: float
+    transaction_count: int
+    confidence: str
+    is_estimated: bool
+
+
+def price_per_unit(total_amount: float, quantity: int) -> float:
+    """Convert a total transaction price into a per-unit price."""
+    if quantity <= 0:
+        raise ValueError("個数は1以上である必要があります。")
+    if total_amount < 0:
+        raise ValueError("金額は0以上である必要があります。")
+
+    return total_amount / quantity
+
+
+def _median_without_extreme_outliers(
+    values: Sequence[float],
+) -> float:
+    """Return a median after removing obvious extreme outliers."""
+    if not values:
+        raise ValueError("価格データがありません。")
+
+    ordered = sorted(float(value) for value in values)
+
+    if len(ordered) < 5:
+        return float(median(ordered))
+
+    q1 = float(median(ordered[: len(ordered) // 2]))
+    q3 = float(median(ordered[(len(ordered) + 1) // 2 :]))
+    iqr = q3 - q1
+
+    if iqr <= 0:
+        return float(median(ordered))
+
+    lower = q1 - 1.5 * iqr
+    upper = q3 + 1.5 * iqr
+
+    filtered = [
+        value for value in ordered
+        if lower <= value <= upper
+    ]
+
+    if not filtered:
+        filtered = ordered
+
+    return float(median(filtered))
+
+
+def estimate_level_one_price(
+    observations: Sequence[PriceObservation],
+) -> MarketEstimate:
+    """
+    Estimate the level-1 market price.
+
+    Level 1 observations are used directly.
+    Higher-level observations are currently kept separate until
+    enough data exists to safely estimate the level curve.
+    """
+    if not observations:
+        raise ValueError("価格データがありません。")
+
+    level_one = [
+        observation.price_per_unit
+        for observation in observations
+        if observation.level == 1
+    ]
+
+    if level_one:
+        price = _median_without_extreme_outliers(level_one)
+        count = len(level_one)
+
+        if count >= 10:
+            confidence = "高"
+        elif count >= 5:
+            confidence = "中"
+        else:
+            confidence = "低"
+
+        return MarketEstimate(
+            character_name=observations[0].character_name,
+            level=1,
+            price=price,
+            transaction_count=count,
+            confidence=confidence,
+            is_estimated=False,
+        )
+
+    # There is currently no direct level-1 transaction.
+    # We intentionally do not guess a level curve yet.
+    return MarketEstimate(
+        character_name=observations[0].character_name,
+        level=1,
+        price=0.0,
+        transaction_count=0,
+        confidence="データ不足",
+        is_estimated=True,
+    )
