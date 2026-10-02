@@ -119,4 +119,55 @@ def estimate_level_one_price(
         transaction_count=0,
         confidence="データ不足",
         is_estimated=True,
+        def load_character_observations(
+    connection,
+    character_name: str,
+) -> list[PriceObservation]:
+    """Load usable non-set trades for one character from SQLite."""
+    rows = connection.execute(
+        """
+        SELECT character_name, level, quantity, total_amount
+        FROM trades
+        WHERE character_name = ?
+          AND transaction_type != 'セット'
+          AND is_verified = 1
+          AND quantity > 0
+          AND total_amount >= 0
+        ORDER BY id
+        """,
+        (character_name,),
+    ).fetchall()
+
+    observations: list[PriceObservation] = []
+
+    for row in rows:
+        stored_name = str(row[0])
+        level_text = str(row[1]).strip()
+
+        try:
+            level = int(level_text)
+        except (TypeError, ValueError):
+            continue
+
+        if level < 1:
+            continue
+
+        quantity = int(row[2])
+        total_amount = float(row[3])
+
+        if quantity <= 0 or total_amount < 0:
+            continue
+
+        observations.append(
+            PriceObservation(
+                character_name=stored_name,
+                level=level,
+                price_per_unit=price_per_unit(
+                    total_amount,
+                    quantity,
+                ),
+            )
+        )
+
+    return observations
     )
