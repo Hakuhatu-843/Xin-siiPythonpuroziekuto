@@ -110,8 +110,6 @@ def estimate_level_one_price(
             is_estimated=False,
         )
 
-    # There is currently no direct level-1 transaction.
-    # We intentionally do not guess a level curve yet.
     return MarketEstimate(
         character_name=observations[0].character_name,
         level=1,
@@ -119,8 +117,10 @@ def estimate_level_one_price(
         transaction_count=0,
         confidence="データ不足",
         is_estimated=True,
-    ) 
-   def load_character_observations(
+    )
+
+
+def load_character_observations(
     connection,
     character_name: str,
 ) -> list[PriceObservation]:
