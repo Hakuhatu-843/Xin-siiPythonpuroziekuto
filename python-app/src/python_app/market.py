@@ -228,6 +228,17 @@ def load_verified_character_observations(
                     quantity,
                 ),
             )
+            def calculate_mutation_multiplier(
+    normal_price: float,
+    mutation_price: float,
+) -> float:
+    """Calculate a character-specific mutation multiplier."""
+    if normal_price <= 0:
+        raise ValueError("通常価格は0より大きい必要があります。")
+    if mutation_price < 0:
+        raise ValueError("変異価格は0以上である必要があります。")
+
+    return mutation_price / normal_price
         )
 
     return observations
