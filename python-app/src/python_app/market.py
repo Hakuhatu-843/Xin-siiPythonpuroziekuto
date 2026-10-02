@@ -120,7 +120,7 @@ def estimate_level_one_price(
         confidence="データ不足",
         is_estimated=True,
     ) 
-       def load_character_observations(
+    def load_character_observations(
     connection,
     character_name: str,
 ) -> list[PriceObservation]:
