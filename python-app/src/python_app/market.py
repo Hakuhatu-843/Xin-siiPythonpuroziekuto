@@ -119,8 +119,9 @@ def estimate_level_one_price(
         transaction_count=0,
         confidence="データ不足",
         is_estimated=True,
+    ) 
         def load_character_observations(
-    connection,
+        connection,
     character_name: str,
 ) -> list[PriceObservation]:
     """Load usable non-set trades for one character from SQLite."""
