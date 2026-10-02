@@ -219,7 +219,7 @@ def load_verified_character_observations(
         if quantity <= 0 or total_amount < 0:
             continue
 
-                observations.append(
+observations.append(
             PriceObservation(
                 character_name=stored_name,
                 level=level,
