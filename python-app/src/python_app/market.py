@@ -171,3 +171,64 @@ def load_character_observations(
         )
 
     return observations
+def load_verified_character_observations(
+    connection,
+    character_name: str,
+    mutation: str = "",
+) -> list[PriceObservation]:
+    """Load verified non-set observations for one character and mutation."""
+    rows = connection.execute(
+        """
+        SELECT
+            tc.character_name,
+            tc.level,
+            tc.quantity,
+            t.total_amount
+        FROM trade_characters AS tc
+        JOIN trades AS t
+          ON t.id = tc.trade_id
+        WHERE tc.character_name = ?
+          AND tc.mutation = ?
+          AND tc.is_verified = 1
+          AND t.is_verified = 1
+          AND t.transaction_type != 'セット'
+          AND tc.quantity > 0
+          AND t.total_amount >= 0
+        ORDER BY t.id, tc.position
+        """,
+        (character_name, mutation),
+    ).fetchall()
+
+    observations: list[PriceObservation] = []
+
+    for row in rows:
+        stored_name = str(row[0])
+        level_text = str(row[1]).strip()
+
+        try:
+            level = int(level_text)
+        except (TypeError, ValueError):
+            continue
+
+        if level < 1:
+            continue
+
+        quantity = int(row[2])
+        total_amount = float(row[3])
+
+        if quantity <= 0 or total_amount < 0:
+            continue
+
+        observations.append(
+            PriceObservation(
+                character_name=stored_name,
+                level=level,
+                price_per_unit=price_per_unit(
+                    total_amount,
+                    quantity,
+                ),
+            )
+        )
+
+    return observations
+    
