@@ -1,1 +1,0 @@
-- [Discord API rate limits](discord-api-rate-limits.md) — Stop on Discord global 429s and require a deliberate manual retry; never expose the token.
