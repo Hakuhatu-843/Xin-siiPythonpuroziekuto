@@ -1,0 +1,49 @@
+name: Validate Trade Value
+
+on:
+  push:
+    branches: [main, d1-web-api]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check Worker JavaScript
+        run: node --check worker/src/index.js
+
+      - name: Check frontend JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("index.html").read_text(encoding="utf-8")
+          scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
+          assert scripts, "No inline script found"
+          Path("/tmp/frontend.js").write_text(scripts[-1], encoding="utf-8")
+          PY
+          node --check /tmp/frontend.js
+
+      - name: Validate D1 schema
+        run: |
+          python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          sql = Path("worker/schema.sql").read_text(encoding="utf-8")
+          con = sqlite3.connect(":memory:")
+          con.executescript(sql)
+          tables = {row[0] for row in con.execute(
+              "SELECT name FROM sqlite_master WHERE type='table'"
+          )}
+          required = {"trades", "trade_characters"}
+          missing = required - tables
+          assert not missing, f"Missing tables: {missing}"
+          print("D1 schema OK:", sorted(required))
+          PY
