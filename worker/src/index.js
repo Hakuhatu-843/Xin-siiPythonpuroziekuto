@@ -183,7 +183,7 @@ export default {
         return createTrade(request, env);
       }
 
-      const match = url.pathname.match(/^\\/trades\\/(\\d+)$/);
+      const match = url.pathname.match(/^\/trades\/(\d+)$/);
       if (request.method === "GET" && match) {
         return getTrade(request, env, match[1]);
       }
