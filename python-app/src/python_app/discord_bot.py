@@ -1507,8 +1507,7 @@ def create_bot() -> PythonAppBot:
             "※最高Lvは登録されている取引データの最高レベルです。",
             "※変異倍率はLv.1の変異価格 ÷ 通常価格です。",
         ])
-        await interaction.response.send_message("
-".join(lines), ephemeral=True)
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     @bot.tree.command(
         name="trades",
