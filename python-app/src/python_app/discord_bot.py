@@ -1442,8 +1442,7 @@ def create_bot() -> PythonAppBot:
 
         price = f"{estimate.price:,.0f}"
         await interaction.response.send_message(
-            "
-".join(
+            "\n".join(
                 [
                     f"**{_escape_for_discord(resolution.character_name)} の相場**",
                     f"レベル: {level}",
