@@ -252,3 +252,53 @@ def calculate_mutation_multiplier(
     if mutation_price < 0:
         raise ValueError("変異価格は0以上である必要があります。")
     return mutation_price / normal_price
+
+
+def load_character_market_observations(
+    connection,
+    character_name: str,
+) -> dict[str, list[PriceObservation]]:
+    """Load verified non-set observations grouped by mutation."""
+    rows = connection.execute(
+        """
+        SELECT tc.character_name, tc.mutation, tc.level, tc.quantity, t.total_amount
+        FROM trade_characters AS tc
+        JOIN trades AS t ON t.id = tc.trade_id
+        WHERE tc.character_name = ?
+          AND tc.is_verified = 1
+          AND t.is_verified = 1
+          AND t.transaction_type != 'セット'
+          AND tc.quantity > 0
+        UNION ALL
+        SELECT t.character_name, t.mutation, t.level, t.quantity, t.total_amount
+        FROM trades AS t
+        WHERE t.character_name = ?
+          AND t.is_verified = 1
+          AND t.transaction_type != 'セット'
+          AND t.quantity > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM trade_characters AS existing
+              WHERE existing.trade_id = t.id
+          )
+        """,
+        (character_name, character_name),
+    ).fetchall()
+    grouped: dict[str, list[PriceObservation]] = {}
+    for row in rows:
+        try:
+            level = int(str(row[2]).strip())
+            quantity = int(row[3])
+            amount = parse_market_amount(row[4])
+        except (TypeError, ValueError):
+            continue
+        if level < 1 or quantity <= 0:
+            continue
+        mutation = str(row[1]).strip() or "通常"
+        grouped.setdefault(mutation, []).append(
+            PriceObservation(
+                character_name=str(row[0]),
+                level=level,
+                price_per_unit=price_per_unit(amount, quantity),
+            )
+        )
+    return grouped
