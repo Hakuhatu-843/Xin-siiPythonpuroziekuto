@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>取引データ入力 | Trade Value</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg:#12151f;--panel:#1a1f2d;--panel2:#222839;--line:#2f3750;--text:#e9ecf4;--muted:#939cb3;--acc:#f2b84b;--ink:#1b1403;--err:#ff7b7b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--text);font:500 16px/1.6 "Noto Sans JP",system-ui,sans-serif}
+.wrap{max-width:640px;margin:0 auto;padding:16px 16px 0}
+header{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+h1{font-size:18px;margin:0;color:var(--acc)}header p{margin:0;color:var(--muted);font-size:14px}
+#prog .segs{display:flex;gap:4px}#prog .segs i{flex:1;height:6px;border-radius:3px;background:var(--line)}
+#prog .segs i.d{background:#6b5a2e}#prog .segs i.c{background:var(--acc)}
+#prog p{display:flex;justify-content:space-between;margin:8px 0 0;font-size:14px;color:var(--muted)}#prog b{color:var(--text)}
+main{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 16px 0;margin-top:14px}
+h2{font-size:22px;line-height:1.4;margin:0 0 4px}
+.sub{margin:0 0 16px;color:var(--muted);font-size:14px}h2+.list,h2+.grid{margin-top:14px}
+.slot{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:0 10px;font-size:13px;color:var(--acc);margin-bottom:8px}
+.list,.grid{display:grid;gap:10px}.grid{grid-template-columns:repeat(2,1fr)}
+@media(min-width:520px){.grid.c3{grid-template-columns:repeat(3,1fr)}}
+.opt{display:block;width:100%;min-height:60px;text-align:left;background:var(--bg);color:var(--text);border:2px solid var(--line);border-radius:12px;padding:10px 16px;font:700 16px/1.4 "Noto Sans JP",sans-serif;cursor:pointer}
+.opt small{display:block;color:var(--muted);font-weight:400;font-size:13px}
+.opt[style*="--c"]{border-left:8px solid var(--c)}
+.opt[aria-pressed=true]{border-color:var(--c,var(--acc));background:color-mix(in srgb,var(--c,var(--acc)) 18%,var(--bg))}
+.opt[aria-pressed=true]::after{content:"✓";float:right;color:var(--c,var(--acc))}
+.txt{width:100%;min-height:56px;background:var(--bg);border:2px solid var(--line);border-radius:12px;color:var(--text);padding:0 14px;font:700 20px "Noto Sans JP",sans-serif;font-variant-numeric:tabular-nums}
+.txt:focus-visible,.btn:focus-visible,.opt:focus-visible,.chip:focus-visible,.link:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.txt[aria-invalid=true]{border-color:var(--err)}
+#q{font:500 16px "Noto Sans JP",sans-serif;margin:14px 0 12px}
+.num{display:flex;gap:10px;margin-top:14px}.num .txt{text-align:center}
+.step{flex:none;width:56px;min-height:56px;border-radius:12px;border:2px solid var(--line);background:var(--panel2);color:var(--text);font:700 24px sans-serif;cursor:pointer}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.chip{min-height:44px;padding:0 14px;border-radius:22px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:500 15px "Noto Sans JP",sans-serif;cursor:pointer}
+.err{min-height:1.6em;margin:10px 0 0;color:var(--err);font-size:14px;font-weight:700}
+.empty{grid-column:1/-1;color:var(--muted);text-align:center;padding:20px 0}
+.preview{margin:8px 0 0;color:var(--muted);font-size:14px}
+.bar{position:sticky;bottom:0;display:flex;gap:12px;padding:12px 0 14px;background:linear-gradient(rgba(26,31,45,0),var(--panel) 22%)}
+.btn{flex:1;min-height:56px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:700 17px/1.2 "Noto Sans JP",sans-serif;cursor:pointer}
+.btn.primary{background:var(--acc);color:var(--ink);border-color:var(--acc)}
+.btn.ghost{flex:0 0 34%}.btn.wide{width:100%;margin-top:14px;flex:none}
+.btn:disabled{opacity:.5}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.row span{color:var(--muted);font-size:14px}.row b{text-align:right}
+.card2{background:var(--panel2);border-radius:12px;padding:6px 14px 8px;margin:10px 0;border-left:8px solid var(--c)}
+.card2 .row:last-child{border-bottom:0}
+.link{background:none;border:0;color:var(--acc);font:700 14px "Noto Sans JP",sans-serif;min-height:44px;padding:0 6px;cursor:pointer}
+.link.del{color:var(--err)}
+.price{font-size:26px;color:var(--acc);font-variant-numeric:tabular-nums}
+.done{text-align:center;padding:12px 0 4px}
+.done .ok{width:72px;height:72px;margin:0 auto 12px;border-radius:50%;background:#1f4d3d;color:#6ee7b7;font-size:36px;line-height:72px}
+details{margin:12px 0;color:var(--muted);font-size:13px;text-align:left}pre{overflow-x:auto;background:var(--bg);padding:10px;border-radius:8px;color:var(--text)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>Trade Value</h1><p>取引データ入力</p></header>
+  <div id="prog" role="group"></div>
+  <main id="app"></main>
+</div>
+
+<script>
+/* ============================================================
+   マスターデータ(ここだけ差し替えれば内容を変更できます)
+   将来は fetch('/api/master') などで取得したJSONを MASTER に代入するだけ。
+   ※ キャラクター名はサンプルです
+   ============================================================ */
+const MASTER = {
+  maxItems: 3,                                   // まとめ買い・セットの最大キャラクター数
+  levels: { min: 1, max: 301, presets: [1, 10, 50, 100, 200, 301] },
+  tradeTypes: [
+    { id: 'single', label: '単体',     desc: '1キャラクターの取引',                   multi: false, priceLabel: '取引価格' },
+    { id: 'bundle', label: 'まとめ買い', desc: '最大3キャラクターを1つの取引として登録', multi: true,  priceLabel: 'まとめ買い全体の価格' },
+    { id: 'set',    label: 'セット',     desc: '最大3キャラクターのセットを登録',       multi: true,  priceLabel: 'セット全体の価格' }
+  ],
+  rarities: [
+    { id: 'common',    label: 'コモン',       color: '#9be23c' },  /* 黄緑 */
+    { id: 'rare',      label: 'レア',         color: '#3b8cff' },  /* 青 */
+    { id: 'epic',      label: 'エピック',     color: '#a259ff' },  /* 紫 */
+    { id: 'legend',    label: 'レジェンド',   color: '#ff9f43' },  /* オレンジ */
+    { id: 'mythic',    label: 'ミシック',     color: '#ff4d4d' },  /* 赤 */
+    { id: 'secret',    label: 'シークレット', color: '#4b4f5c' },  /* 黒(暗い背景で見えるよう少し明るめ) */
+    { id: 'ultimate',  label: 'アルティメット', color: '#ffd24a' }, /* 金色 */
+    { id: 'emperor',   label: 'エンペラー',   color: '#8f1d2c' }   /* 赤黒 */
+  ],
+  mutations: [
+    { id: 'normal',    label: 'ノーマル', color: '#f1f3f8' },  /* 白 */
+    { id: 'silver',    label: 'シルバー', color: '#9aa0ab' },  /* 灰色 */
+    { id: 'gold',      label: 'ゴールド', color: '#ffe14d' },  /* 黄色 */
+    { id: 'diamond',   label: 'ダイヤ',   color: '#5fe0f0' },  /* 水色 */
+    { id: 'lava',      label: 'ラバ',     color: '#ff5a2e' },  /* 赤オレンジ */
+    { id: 'galaxy',    label: 'ギャラ',   color: '#a259ff' },  /* 紫 */
+    { id: 'aqua',      label: 'アクア',   color: '#3b7bff' },  /* ※色の指定なし。仮で青 */
+    { id: 'yggdrasil', label: 'ユグ',     color: '#4cd964' },  /* 緑 */
+    { id: 'halo',      label: 'ハロ',     color: '#ff9f43' }   /* オレンジ */
+  ],
+  characters: [
+    { id: 'c001', name: 'スライム', rarity: 'common' }, { id: 'c002', name: 'ゴブリン', rarity: 'common' },
+    { id: 'c003', name: 'コウモリ', rarity: 'common' }, { id: 'c004', name: 'キノコ', rarity: 'common' },
+    { id: 'r001', name: 'オーク', rarity: 'rare' }, { id: 'r002', name: 'ウルフ', rarity: 'rare' },
+    { id: 'r003', name: 'ガーゴイル', rarity: 'rare' }, { id: 'r004', name: 'ハーピー', rarity: 'rare' },
+    { id: 'e001', name: 'ミノタウロス', rarity: 'epic' }, { id: 'e002', name: 'セイレーン', rarity: 'epic' },
+    { id: 'e003', name: 'ゴーレム', rarity: 'epic' }, { id: 'e004', name: 'ヴァンパイア', rarity: 'epic' },
+    { id: 'l001', name: 'フェニックス', rarity: 'legend' }, { id: 'l002', name: 'グリフォン', rarity: 'legend' },
+    { id: 'l003', name: 'ユニコーン', rarity: 'legend' }, { id: 'l004', name: 'ケルベロス', rarity: 'legend' },
+    { id: 'm001', name: 'リヴァイアサン', rarity: 'mythic' }, { id: 'm002', name: 'ベヒーモス', rarity: 'mythic' },
+    { id: 'm003', name: 'ジャバウォック', rarity: 'mythic' }, { id: 'm004', name: 'クラーケン', rarity: 'mythic' },
+    { id: 's001', name: '影の王', rarity: 'secret' }, { id: 's002', name: '星詠み', rarity: 'secret' },
+    { id: 's003', name: '虚無の番人', rarity: 'secret' }, { id: 's004', name: '月影の姫', rarity: 'secret' },
+    { id: 'u001', name: '黄金の守護者', rarity: 'ultimate' }, { id: 'u002', name: '光輪の聖騎士', rarity: 'ultimate' },
+    { id: 'u003', name: '創世の巨神', rarity: 'ultimate' }, { id: 'u004', name: '星海の覇龍', rarity: 'ultimate' },
+    { id: 'x001', name: '天帝竜', rarity: 'emperor' }, { id: 'x002', name: '冥府の皇帝', rarity: 'emperor' },
+    { id: 'x003', name: '時の覇者', rarity: 'emperor' }, { id: 'x004', name: '終焉の女帝', rarity: 'emperor' }
+  ]
+};
+
+/* 送信処理(今はコンソール出力のみ。後でAPI呼び出しに差し替える) */
+function submitTrade(payload) { console.log('送信データ', payload); return Promise.resolve(); }
+
+/* ===================== 状態管理 ===================== */
+const M = MASTER, L = M.levels;
+const STEPS = ['type', 'rarity', 'char', 'level', 'mut', 'qty', 'price', 'confirm'];
+const LABEL = { type: '取引タイプ', rarity: 'レアリティ', char: 'キャラクター', level: 'レベル', mut: '変異', qty: '個数', price: '価格', confirm: '確認' };
+let S;
+const fresh = () => { S = { step: 'type', type: null, items: [], cur: 0, price: '', touched: false, live: false, q: '', fromConfirm: false, last: null }; };
+const $ = s => document.querySelector(s);
+const byId = (a, id) => a.find(x => x.id === id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const tType = () => S.type ? byId(M.tradeTypes, S.type) : null;
+const isMulti = () => !!(tType() && tType().multi);
+const item = () => S.items[S.cur];
+const newItem = () => ({ rarity: null, char: null, level: '', mut: null, qty: '1' });
+const get = f => f === 'price' ? S.price : item()[f];
+const set = (f, v) => { if (f === 'price') S.price = v; else item()[f] = v; };
+const fmt = n => Number(n).toLocaleString('ja-JP');
+
+function validate(step) {
+  const it = S.items[S.cur];
+  switch (step) {
+    case 'type': return S.type ? '' : '取引タイプを選んでください';
+    case 'rarity': return it.rarity ? '' : 'レアリティを選んでください';
+    case 'char': return it.char ? '' : 'キャラクターを選んでください';
+    case 'level': { const n = Number(it.level); return it.level !== '' && Number.isInteger(n) && n >= L.min && n <= L.max ? '' : `レベルは${L.min}〜${L.max}の整数で入力してください`; }
+    case 'mut': return it.mut ? '' : '変異を選んでください(ない場合は「なし」)';
+    case 'qty': return /^[1-9]\d*$/.test(it.qty) ? '' : '個数は1以上の整数で入力してください';
+    case 'price': return /^[1-9]\d*$/.test(S.price) ? '' : '取引価格は1以上の数値で入力してください';
+  }
+  return '';
+}
+
+/* ===================== 画面部品 ===================== */
+const opt = (v, html, sel, st = '') => `<button type="button" class="opt" data-v="${v}" aria-pressed="${sel}" style="${st}">${html}</button>`;
+const bar = (back = true, label = '次へ') => `<div class="bar">${back ? '<button type="button" class="btn ghost" data-a="back">戻る</button>' : ''}<button type="button" class="btn primary" data-a="next">${label}</button></div>`;
+const head = (t, sub) => `${isMulti() && S.step !== 'type' ? `<span class="slot">キャラクター ${S.cur + 1} / ${M.maxItems}</span>` : ''}<h2>${t}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}`;
+const errP = '<p class="err" id="err" role="alert"></p>';
+const num = (f, val, hint) => `<div class="num"><button type="button" class="step" data-f="${f}" data-d="-1" aria-label="1減らす">−</button><input class="txt" data-f="${f}" inputmode="numeric" autocomplete="off" value="${val}" placeholder="${hint}"><button type="button" class="step" data-f="${f}" data-d="1" aria-label="1増やす">＋</button></div>`;
+
+const VIEWS = {
+  type: () => head('取引タイプを選択') + `<div class="list">${M.tradeTypes.map(t => opt(t.id, `${t.label}<small>${t.desc}</small>`, S.type === t.id)).join('')}</div>` + errP + bar(false),
+  rarity: () => head('レアリティを選択') + `<div class="grid">${M.rarities.map(r => opt(r.id, r.label, item().rarity === r.id, `--c:${r.color}`)).join('')}</div>` + errP + bar(),
+  char: () => head('キャラクターを選択', `${byId(M.rarities, item().rarity).label}のキャラクターのみ表示しています`) +
+    `<input class="txt" id="q" type="search" placeholder="キャラクター名で検索" value="${esc(S.q)}" autocomplete="off" aria-label="キャラクター検索"><div id="chars" class="grid c3"></div>` + errP + bar(),
+  level: () => head('レベルを入力', '取引価格に影響するため必須です') + num('level', item().level, `${L.min}〜${L.max}`) +
+    `<div class="chips">${L.presets.map(p => `<button type="button" class="chip" data-p="${p}">Lv.${p}</button>`).join('')}</div>` + errP + bar(),
+  mut: () => head('変異を選択') + `<div class="grid">${M.mutations.map(m => opt(m.id, m.label, item().mut === m.id, `--c:${m.color}`)).join('')}</div>` + errP + bar(),
+  qty: () => head('個数を入力', '1以上の整数') + num('qty', item().qty, '1') +
+    (isMulti() && S.items.length < M.maxItems ? `<button type="button" class="btn wide" data-a="add">＋ キャラクターを追加(${S.items.length}/${M.maxItems})</button>` : '') +
+    errP + bar(true, isMulti() ? '価格入力へ' : '次へ'),
+  price: () => head(tType().priceLabel + 'を入力', isMulti() ? 'キャラクターごとではなく、全体の価格を1つ入力します' : 'この取引全体の価格を入力します') +
+    `<input class="txt" data-f="price" inputmode="numeric" autocomplete="off" placeholder="例: 15000" value="${S.price}" aria-label="${tType().priceLabel}"><p class="preview" id="pv">${S.price ? fmt(S.price) : ''}</p>` + errP + bar(),
+  confirm: () => {
+    const t = tType();
+    const items = S.items.map((it, i) => {
+      const r = byId(M.rarities, it.rarity), c = byId(M.characters, it.char), m = byId(M.mutations, it.mut);
+      return `<div class="card2" style="--c:${r.color}"><div class="row"><b>${esc(c.name)}(${r.label})</b><span>${isMulti() && S.items.length > 1 ? `<button type="button" class="link del" data-a="del" data-i="${i}">削除</button>` : ''}<button type="button" class="link" data-a="edit" data-to="rarity" data-i="${i}">変更</button></span></div>
+        <div class="row"><span>レベル</span><b>Lv.${it.level}</b></div><div class="row"><span>変異</span><b>${m.label}</b></div><div class="row"><span>個数</span><b>×${fmt(it.qty)}</b></div></div>`;
+    }).join('');
+    return `<h2>内容を確認</h2><p class="sub">この内容で送信します</p>
+      <div class="row"><span>取引タイプ</span><b>${t.label} <button type="button" class="link" data-a="edit" data-to="type" data-i="0">変更</button></b></div>${items}
+      <div class="row"><span>${t.priceLabel}</span><b class="price">${fmt(S.price)} <button type="button" class="link" data-a="edit" data-to="price" data-i="${S.items.length - 1}">変更</button></b></div>
+      <p class="err" id="err" role="alert"></p>
+      <div class="bar"><button type="button" class="btn ghost" data-a="fix">修正する</button><button type="button" class="btn primary" data-a="submit">送信する</button></div>`;
+  },
+  done: () => `<div class="done"><div class="ok" aria-hidden="true">✓</div><h2>取引データを送信しました</h2><p class="sub">ご協力ありがとうございます。続けて別の取引も入力できます。</p>
+    <details><summary>送信データ(開発用)</summary><pre>${esc(JSON.stringify(S.last, null, 2))}</pre></details></div>
+    <div class="bar"><button type="button" class="btn primary" data-a="reset">最初の画面へ戻る</button></div>`
+};
+
+/* ===================== 描画・操作 ===================== */
+function render(top) {
+  const done = S.step === 'done', p = $('#prog');
+  p.hidden = done;
+  if (!done) {
+    const i = STEPS.indexOf(S.step);
+    p.setAttribute('aria-label', `ステップ ${i + 1} / ${STEPS.length}`);
+    p.innerHTML = `<div class="segs">${STEPS.map((s, k) => `<i class="${k < i ? 'd' : k === i ? 'c' : ''}"></i>`).join('')}</div><p><b>${LABEL[S.step]}</b><span>ステップ ${i + 1} / ${STEPS.length}</span></p>`;
+  }
+  $('#app').innerHTML = VIEWS[S.step]();
+  if (S.step === 'char') fillChars();
+  refreshErr();
+  if (top) window.scrollTo(0, 0);
+}
+function fillChars() {
+  const it = item(), q = S.q.trim().toLowerCase();
+  const l = M.characters.filter(c => c.rarity === it.rarity && c.name.toLowerCase().includes(q));
+  $('#chars').innerHTML = l.length ? l.map(c => opt(c.id, esc(c.name), it.char === c.id, `--c:${byId(M.rarities, it.rarity).color}`)).join('') : '<p class="empty">該当するキャラクターがいません</p>';
+}
+function refreshErr() {
+  const el = $('#err'); if (!el || S.step === 'confirm') return;
+  const e = validate(S.step), show = (S.touched || S.live) && e;
+  el.textContent = show ? e : '';
+  document.querySelectorAll('input[data-f]').forEach(i => i.setAttribute('aria-invalid', show ? 'true' : 'false'));
+}
+function go(step) {
+  S.step = step; S.touched = false; S.live = false; S.q = '';
+  if (step === 'confirm') S.fromConfirm = false;
+  render(true);
+}
+function setField(f, v) {
+  set(f, v); S.live = true;
+  const inp = document.querySelector(`input[data-f="${f}"]`); if (inp) inp.value = v;
+  const pv = $('#pv'); if (pv) pv.textContent = f === 'price' && v ? fmt(v) : '';
+  refreshErr();
+}
+function choose(v) {
+  const it = S.items[S.cur];
+  if (S.step === 'type') S.type = v;
+  else if (S.step === 'rarity') { if (it.rarity !== v) it.char = null; it.rarity = v; }
+  else if (S.step === 'char') it.char = v;
+  else if (S.step === 'mut') it.mut = v;
+  S.touched = false; render(false);
+}
+function next() {
+  S.touched = true;
+  if (S.step === 'type' && !validate('type')) { if (!S.items.length) S.items = [newItem()]; if (!isMulti()) S.items.length = 1; S.cur = Math.min(S.cur, S.items.length - 1); }
+  const e = validate(S.step); if (e) { refreshErr(); return; }
+  let to = STEPS[STEPS.indexOf(S.step) + 1];
+  if (S.fromConfirm && !(S.step === 'rarity' && !item().char)) to = 'confirm';
+  go(to);
+}
+function back() {
+  if (S.fromConfirm) { go('confirm'); return; }
+  const i = STEPS.indexOf(S.step);
+  if (S.step === 'rarity' && S.cur > 0) { S.cur--; go('qty'); return; }
+  if (S.step === 'price') S.cur = S.items.length - 1;
+  go(STEPS[i - 1]);
+}
+async function submit(btn) {
+  btn.disabled = true;
+  S.last = { tradeType: S.type, items: S.items.map(i => ({ rarity: i.rarity, characterId: i.char, level: Number(i.level), mutation: i.mut, quantity: Number(i.qty) })), totalPrice: Number(S.price) };
+  try { await submitTrade(S.last); go('done'); }
+  catch (e) { btn.disabled = false; $('#err').textContent = '送信に失敗しました。もう一度お試しください'; }
+}
+
+const app = $('#app');
+app.addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t) return;
+  const d = t.dataset;
+  if (d.v !== undefined) return choose(d.v);
+  if (d.p) return setField('level', d.p);
+  if (d.d) { const f = d.f, min = f === 'level' ? L.min : 1, max = f === 'level' ? L.max : 9999; return setField(f, String(Math.min(max, Math.max(min, Number(get(f) || 0) + Number(d.d))))); }
+  switch (d.a) {
+    case 'next': return next();
+    case 'back': return back();
+    case 'add': S.touched = true; if (validate('qty')) return refreshErr(); S.items.push(newItem()); S.cur = S.items.length - 1; return go('rarity');
+    case 'edit': S.fromConfirm = true; S.cur = Number(d.i); return go(d.to);
+    case 'del': S.items.splice(Number(d.i), 1); S.cur = 0; return render(false);
+    case 'fix': S.fromConfirm = false; S.cur = 0; return go('type');
+    case 'submit': return submit(t);
+    case 'reset': fresh(); return render(true);
+  }
+});
+app.addEventListener('input', e => {
+  const el = e.target;
+  if (el.id === 'q') { S.q = el.value; return fillChars(); }
+  const f = el.dataset.f; if (!f) return;
+  const v = el.value.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 65248)).replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, f === 'price' ? 12 : f === 'level' ? 3 : 4);
+  setField(f, v);
+});
+app.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input[data-f]')) { e.preventDefault(); next(); } });
+
+fresh(); render(false);
+</script>
+</body>
+</html>
