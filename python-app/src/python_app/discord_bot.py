@@ -1310,7 +1310,7 @@ class PythonAppBot(discord.Client):
         self.add_view(TradeEntryView())
 
     async def setup_hook(self) -> None:
-        """Sync slash commands once when the bot starts."""
+        """Sync global slash commands and mirror them to every connected guild."""
         synced_commands = await self.tree.sync()
         command_names = ", ".join(command.name for command in synced_commands)
         logger.info(
@@ -1318,6 +1318,7 @@ class PythonAppBot(discord.Client):
             len(synced_commands),
             command_names,
         )
+
 
 
 def get_discord_token(
@@ -1351,6 +1352,22 @@ def create_bot() -> PythonAppBot:
             bot.user.name,
             bot.user.id,
         )
+
+        # Guild-scoped commands propagate immediately, avoiding the delay of
+        # Discord's global command propagation for newly added commands.
+        for guild in bot.guilds:
+            try:
+                bot.tree.copy_global_to(guild=guild)
+                guild_commands = await bot.tree.sync(guild=guild)
+                logger.info(
+                    "ギルドコマンドを同期しました: %s (%d件)",
+                    guild.name,
+                    len(guild_commands),
+                )
+            except discord.HTTPException:
+                logger.exception(
+                    "ギルドコマンドの同期に失敗しました: %s", guild.id
+                )
 
     @bot.tree.command(name="ping", description="Check whether the bot is online.")
     async def ping(interaction: discord.Interaction) -> None:
