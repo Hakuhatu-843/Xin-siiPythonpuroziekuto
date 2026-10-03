@@ -1,0 +1,9 @@
+name = "trade-value-api"
+main = "src/index.js"
+compatibility_date = "2026-10-03"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "trade-value"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
