@@ -119,8 +119,30 @@ const MASTER = {
   ]
 };
 
-/* 送信処理(今はコンソール出力のみ。後でAPI呼び出しに差し替える) */
-function submitTrade(payload) { console.log('送信データ', payload); return Promise.resolve(); }
+/* Cloudflare Workers API
+   デプロイ後に発行された workers.dev URLへ差し替えてください。 */
+const API_BASE = 'https://REPLACE_WITH_YOUR_WORKER.workers.dev';
+
+async function submitTrade(payload) {
+  if (API_BASE.includes('REPLACE_WITH_YOUR_WORKER')) {
+    throw new Error('API_BASE is not configured');
+  }
+
+  const res = await fetch(`${API_BASE}/trades`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  let data = null;
+  try { data = await res.json(); } catch {}
+
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.error || `HTTP ${res.status}`);
+  }
+
+  return data;
+}
 
 /* ===================== 状態管理 ===================== */
 const M = MASTER, L = M.levels;
