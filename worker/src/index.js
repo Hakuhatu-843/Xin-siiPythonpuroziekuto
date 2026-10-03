@@ -1,5 +1,7 @@
 const ALLOWED_ORIGINS = new Set([
   "https://hakuhatu-843.github.io",
+  "http://localhost:8000",
+  "http://127.0.0.1:8000",
 ]);
 
 function corsHeaders(origin) {
@@ -78,36 +80,34 @@ async function createTrade(request, env) {
   const submittedAt = new Date().toISOString();
 
   try {
-    const tradeResult = await env.DB
+    const parent = env.DB
       .prepare(
         "INSERT INTO trades (trade_type, total_amount, status, submitted_at) VALUES (?, ?, 'pending', ?)"
       )
-      .bind(body.tradeType, body.totalPrice, submittedAt)
-      .run();
+      .bind(body.tradeType, body.totalPrice, submittedAt);
 
-    const tradeId = tradeResult.meta.last_row_id;
+    const statements = [
+      parent,
+      ...body.items.map((item, index) =>
+        env.DB
+          .prepare(
+            "INSERT INTO trade_characters (trade_id, position, character_id, rarity, level, mutation, quantity, is_verified) VALUES (last_insert_rowid(), ?, ?, ?, ?, ?, ?, 0)"
+          )
+          .bind(
+            index + 1,
+            item.characterId,
+            item.rarity,
+            item.level,
+            item.mutation,
+            item.quantity
+          )
+      ),
+    ];
+
+    const results = await env.DB.batch(statements);
+    const tradeId = results?.[0]?.meta?.last_row_id;
     if (!tradeId) {
       throw new Error("D1 did not return a trade id");
-    }
-
-    const statements = body.items.map((item, index) =>
-      env.DB
-        .prepare(
-          "INSERT INTO trade_characters (trade_id, position, character_id, rarity, level, mutation, quantity, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?, 0)"
-        )
-        .bind(
-          tradeId,
-          index + 1,
-          item.characterId,
-          item.rarity,
-          item.level,
-          item.mutation,
-          item.quantity
-        )
-    );
-
-    if (statements.length) {
-      await env.DB.batch(statements);
     }
 
     return json(
