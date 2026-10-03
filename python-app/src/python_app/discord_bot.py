@@ -138,10 +138,39 @@ def initialize_database(db_path: str | Path = DATABASE_PATH) -> None:
                 mutation TEXT NOT NULL,
                 level TEXT NOT NULL,
                 quantity INTEGER NOT NULL CHECK (quantity > 0),
+                normalized_name TEXT NOT NULL DEFAULT '',
+                is_verified INTEGER NOT NULL DEFAULT 1,
                 UNIQUE (trade_id, position)
             )
             """
         )
+
+        # Older databases may have been created before verification columns
+        # existed. Add the missing columns without deleting existing rows.
+        trade_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(trades)").fetchall()
+        }
+        if "is_verified" not in trade_columns:
+            connection.execute(
+                "ALTER TABLE trades ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 1"
+            )
+
+        character_columns = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(trade_characters)"
+            ).fetchall()
+        }
+        if "normalized_name" not in character_columns:
+            connection.execute(
+                "ALTER TABLE trade_characters ADD COLUMN normalized_name TEXT NOT NULL DEFAULT ''"
+            )
+        if "is_verified" not in character_columns:
+            connection.execute(
+                "ALTER TABLE trade_characters ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 1"
+            )
+
         initialize_character_name_schema(connection)
         connection.commit()
     except Exception:
