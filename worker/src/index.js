@@ -127,7 +127,7 @@ async function createTrade(request, env) {
 }
 
 async function getTrade(request, env, tradeId) {
-  if (!/^\\d+$/.test(tradeId)) {
+  if (!/^\d+$/.test(tradeId)) {
     return json({ ok: false, error: "Invalid trade id" }, 400, request);
   }
 
