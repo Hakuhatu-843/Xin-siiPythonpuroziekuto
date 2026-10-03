@@ -1311,7 +1311,13 @@ class PythonAppBot(discord.Client):
 
     async def setup_hook(self) -> None:
         """Sync slash commands once when the bot starts."""
-        await self.tree.sync()
+        synced_commands = await self.tree.sync()
+        command_names = ", ".join(command.name for command in synced_commands)
+        logger.info(
+            "スラッシュコマンドを同期しました (%d件): %s",
+            len(synced_commands),
+            command_names,
+        )
 
 
 def get_discord_token(
