@@ -14,6 +14,10 @@ from urllib.parse import quote
 import discord
 from discord import app_commands
 
+from .market import (
+    estimate_market_price,
+    load_verified_character_observations,
+)
 from .character_names import (
     CharacterNameResolution,
     UnverifiedNameReview,
@@ -1355,6 +1359,96 @@ def create_bot() -> PythonAppBot:
         await interaction.response.send_message(
             "取引内容を入力する場合は、下のボタンを押してください。",
             view=TradeEntryView(),
+        )
+
+    @bot.tree.command(
+        name="market",
+        description="登録済みの取引データから相場を表示します。",
+    )
+    @app_commands.describe(
+        character="キャラの正式名称",
+        level="レベル（1以上）",
+        mutation="変異名。省略時は通常",
+    )
+    async def market(
+        interaction: discord.Interaction,
+        character: str,
+        level: int,
+        mutation: str = "通常",
+    ) -> None:
+        """Show an evidence-based market estimate for one character."""
+        if level < 1:
+            await interaction.response.send_message(
+                "レベルは1以上で入力してください。",
+                ephemeral=True,
+            )
+            return
+
+        requested_mutation = mutation.strip() or "通常"
+
+        try:
+            initialize_database()
+            with sqlite3.connect(DATABASE_PATH) as connection:
+                resolution = resolve_character_name(connection, character)
+                if not resolution.is_verified:
+                    await interaction.response.send_message(
+                        "このキャラ名はまだ未確認です。管理者の確認後に相場計算の対象になります。",
+                        ephemeral=True,
+                    )
+                    return
+
+                observations = load_verified_character_observations(
+                    connection,
+                    resolution.character_name,
+                    requested_mutation,
+                )
+        except sqlite3.Error:
+            logger.exception("相場データの読み込みに失敗しました。")
+            await interaction.response.send_message(
+                "相場データを読み込めませんでした。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+            return
+
+        if not observations:
+            await interaction.response.send_message(
+                f"「{_escape_for_discord(resolution.character_name)}」"
+                f"（{_escape_for_discord(requested_mutation)}）の確認済み取引データがありません。",
+                ephemeral=True,
+            )
+            return
+
+        estimate = estimate_market_price(
+            observations,
+            level=level,
+            mutation=requested_mutation,
+        )
+
+        if estimate.confidence == "データ不足":
+            await interaction.response.send_message(
+                f"「{_escape_for_discord(resolution.character_name)}」"
+                f" Lv.{level} / {_escape_for_discord(requested_mutation)} は"
+                "同じレベルのデータが不足しています。"
+                "現在は推測値を表示しません。",
+                ephemeral=True,
+            )
+            return
+
+        price = f"{estimate.price:,.0f}"
+        await interaction.response.send_message(
+            "
+".join(
+                [
+                    f"**{_escape_for_discord(resolution.character_name)} の相場**",
+                    f"レベル: {level}",
+                    f"変異: {_escape_for_discord(requested_mutation)}",
+                    f"推定単価: **{price}**",
+                    f"取引件数: {estimate.transaction_count}",
+                    f"信頼度: {estimate.confidence}",
+                    "※セット取引・未確認名の取引は計算対象外です。",
+                ]
+            ),
+            ephemeral=True,
         )
 
     @bot.tree.command(
