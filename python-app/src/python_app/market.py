@@ -219,9 +219,25 @@ def load_verified_character_observations(
           AND t.is_verified = 1
           AND t.transaction_type != 'セット'
           AND tc.quantity > 0
-        ORDER BY t.id, tc.position
+
+        UNION ALL
+
+        SELECT t.character_name, t.level, t.quantity, t.total_amount
+        FROM trades AS t
+        WHERE t.character_name = ?
+          AND t.mutation = ?
+          AND t.is_verified = 1
+          AND t.transaction_type != 'セット'
+          AND t.quantity > 0
+          AND NOT EXISTS (
+              SELECT 1
+              FROM trade_characters AS existing
+              WHERE existing.trade_id = t.id
+          )
+
+        ORDER BY 1
         """,
-        (character_name, mutation),
+        (character_name, mutation, character_name, mutation),
     ).fetchall()
     return _load_observations(rows)
 
