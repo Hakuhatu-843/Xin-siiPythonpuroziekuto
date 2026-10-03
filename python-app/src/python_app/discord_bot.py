@@ -15,7 +15,9 @@ import discord
 from discord import app_commands
 
 from .market import (
+    calculate_mutation_multiplier,
     estimate_market_price,
+    load_character_market_observations,
     load_verified_character_observations,
 )
 from .character_names import (
@@ -1386,29 +1388,14 @@ def create_bot() -> PythonAppBot:
 
     @bot.tree.command(
         name="market",
-        description="登録済みの取引データから相場を表示します。",
+        description="登録済みの取引データからキャラの相場一覧を表示します。",
     )
-    @app_commands.describe(
-        character="キャラの正式名称",
-        level="レベル（1以上）",
-        mutation="変異名。省略時は通常",
-    )
+    @app_commands.describe(character="キャラの正式名称")
     async def market(
         interaction: discord.Interaction,
         character: str,
-        level: int,
-        mutation: str = "通常",
     ) -> None:
-        """Show an evidence-based market estimate for one character."""
-        if level < 1:
-            await interaction.response.send_message(
-                "レベルは1以上で入力してください。",
-                ephemeral=True,
-            )
-            return
-
-        requested_mutation = mutation.strip() or "通常"
-
+        """Show level-1/max prices and mutation multipliers."""
         try:
             initialize_database()
             with sqlite3.connect(DATABASE_PATH) as connection:
@@ -1419,11 +1406,8 @@ def create_bot() -> PythonAppBot:
                         ephemeral=True,
                     )
                     return
-
-                observations = load_verified_character_observations(
-                    connection,
-                    resolution.character_name,
-                    requested_mutation,
+                grouped = load_character_market_observations(
+                    connection, resolution.character_name
                 )
         except sqlite3.Error:
             logger.exception("相場データの読み込みに失敗しました。")
@@ -1433,45 +1417,69 @@ def create_bot() -> PythonAppBot:
             )
             return
 
-        if not observations:
+        if not grouped:
             await interaction.response.send_message(
-                f"「{_escape_for_discord(resolution.character_name)}」"
-                f"（{_escape_for_discord(requested_mutation)}）の確認済み取引データがありません。",
+                f"「{_escape_for_discord(resolution.character_name)}」の確認済み取引データがありません。",
                 ephemeral=True,
             )
             return
 
-        estimate = estimate_market_price(
-            observations,
-            level=level,
-            mutation=requested_mutation,
-        )
+        all_observations = [
+            observation for values in grouped.values() for observation in values
+        ]
+        max_level = max(observation.level for observation in all_observations)
+        normal = grouped.get("通常", [])
 
-        if estimate.confidence == "データ不足":
-            await interaction.response.send_message(
-                f"「{_escape_for_discord(resolution.character_name)}」"
-                f" Lv.{level} / {_escape_for_discord(requested_mutation)} は"
-                "同じレベルのデータが不足しています。"
-                "現在は推測値を表示しません。",
-                ephemeral=True,
+        def price_text(observations: list, level: int) -> str:
+            if not observations:
+                return "データ不足"
+            estimate = estimate_market_price(observations, level=level, mutation="通常")
+            return (
+                f"{estimate.price:,.0f}"
+                if estimate.confidence != "データ不足"
+                else "データ不足"
             )
-            return
 
-        price = f"{estimate.price:,.0f}"
-        await interaction.response.send_message(
-            "\n".join(
-                [
-                    f"**{_escape_for_discord(resolution.character_name)} の相場**",
-                    f"レベル: {level}",
-                    f"変異: {_escape_for_discord(requested_mutation)}",
-                    f"推定単価: **{price}**",
-                    f"取引件数: {estimate.transaction_count}",
-                    f"信頼度: {estimate.confidence}",
-                    "※セット取引・未確認名の取引は計算対象外です。",
-                ]
-            ),
-            ephemeral=True,
-        )
+        lines = [
+            f"**{_escape_for_discord(resolution.character_name)} の相場**",
+            f"基準価格（通常）",
+            f"Lv.1　**{price_text(normal, 1)}**",
+            f"Lv.{max_level}　**{price_text(normal, max_level)}**"
+            f"　（登録データ上の最高Lv）",
+            "",
+            "**変異倍率（通常 = 1.00x）**",
+        ]
+
+        mutation_names = ["通常", "ユグ", "アクア", "ギャラ", "ラバ", "ハロウィン", "ダイヤ", "ゴールド", "ノーマル"]
+        for mutation in mutation_names:
+            observations = grouped.get(mutation)
+            if not observations:
+                continue
+            if mutation == "通常":
+                lines.append("通常　**1.00x**")
+                continue
+            normal_lv1 = estimate_market_price(normal, level=1, mutation="通常") if normal else None
+            mutation_lv1 = estimate_market_price(observations, level=1, mutation=mutation)
+            if (
+                normal_lv1
+                and normal_lv1.confidence != "データ不足"
+                and mutation_lv1.confidence != "データ不足"
+                and normal_lv1.price > 0
+            ):
+                multiplier = calculate_mutation_multiplier(normal_lv1.price, mutation_lv1.price)
+                lines.append(f"{_escape_for_discord(mutation)}　**{multiplier:.2f}x**")
+            else:
+                lines.append(f"{_escape_for_discord(mutation)}　—（Lv.1データ不足）")
+
+        lines.extend([
+            "",
+            f"使用データ: {len(all_observations)}件",
+            "※セット取引・未確認名・計算できない金額は対象外です。",
+            "※最高Lvは登録されている取引データの最高レベルです。",
+            "※変異倍率はLv.1の変異価格 ÷ 通常価格です。",
+        ])
+        await interaction.response.send_message("
+".join(lines), ephemeral=True)
 
     @bot.tree.command(
         name="trades",
