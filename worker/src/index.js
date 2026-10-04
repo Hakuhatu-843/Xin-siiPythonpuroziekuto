@@ -206,6 +206,57 @@ async function getTrades(request, env) {
   }
 }
 
+
+async function updateTradeStatus(request, env, tradeId) {
+  if (!/^\d+$/.test(tradeId)) {
+    return json({ ok: false, error: "Invalid trade id" }, 400, request);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ ok: false, error: "Invalid JSON" }, 400, request);
+  }
+
+  if (!["pending", "approved", "rejected"].includes(body?.status)) {
+    return json({ ok: false, error: "Invalid status" }, 400, request);
+  }
+
+  const id = Number(tradeId);
+
+  try {
+    const trade = await env.DB
+      .prepare("SELECT id FROM trades WHERE id = ?")
+      .bind(id)
+      .first();
+
+    if (!trade) {
+      return json({ ok: false, error: "Trade not found" }, 404, request);
+    }
+
+    const verified = body.status === "approved" ? 1 : 0;
+
+    await env.DB.batch([
+      env.DB
+        .prepare("UPDATE trades SET status = ? WHERE id = ?")
+        .bind(body.status, id),
+      env.DB
+        .prepare("UPDATE trade_characters SET is_verified = ? WHERE trade_id = ?")
+        .bind(verified, id),
+    ]);
+
+    return json(
+      { ok: true, tradeId: id, status: body.status },
+      200,
+      request
+    );
+  } catch (error) {
+    console.error("updateTradeStatus failed", error);
+    return json({ ok: false, error: "Database error" }, 500, request);
+  }
+}
+
 async function getTrade(request, env, tradeId) {
   if (!/^\d+$/.test(tradeId)) {
     return json({ ok: false, error: "Invalid trade id" }, 400, request);
@@ -261,6 +312,11 @@ export default {
 
       if (request.method === "POST" && url.pathname === "/trades") {
         return createTrade(request, env);
+      }
+
+      const statusMatch = url.pathname.match(/^\/trades\/(\d+)\/status$/);
+      if (request.method === "POST" && statusMatch) {
+        return updateTradeStatus(request, env, statusMatch[1]);
       }
 
       if (request.method === "GET" && url.pathname === "/trades") {
