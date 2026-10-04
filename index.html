@@ -65,39 +65,35 @@ details{margin:12px 0;color:var(--muted);font-size:13px;text-align:left}pre{over
 </div>
 
 <script>
-/* ============================================================
-   マスターデータ(ここだけ差し替えれば内容を変更できます)
-   将来は fetch('/api/master') などで取得したJSONを MASTER に代入するだけ。
-   ※ キャラクター名はサンプルです
-   ============================================================ */
 const MASTER = {
-  maxItems: 3,                                   // まとめ買い・セットの最大キャラクター数
+  maxItems: 3,
   levels: { min: 1, max: 301, presets: [1, 10, 50, 100, 200, 301] },
   tradeTypes: [
-    { id: 'single', label: '単体',     desc: '1キャラクターの取引',                   multi: false, priceLabel: '取引価格' },
-    { id: 'bundle', label: 'まとめ買い', desc: '最大3キャラクターを1つの取引として登録', multi: true,  priceLabel: 'まとめ買い全体の価格' },
-    { id: 'set',    label: 'セット',     desc: '最大3キャラクターのセットを登録',       multi: true,  priceLabel: 'セット全体の価格' }
+    { id: 'single', label: '単体', desc: '1キャラクターの取引', multi: false, priceLabel: '取引価格' },
+    { id: 'bundle', label: 'まとめ買い', desc: '最大3キャラクターを1つの取引として登録', multi: true, priceLabel: 'まとめ買い全体の価格' },
+    { id: 'set', label: 'セット', desc: '最大3キャラクターのセットを登録', multi: true, priceLabel: 'セット全体の価格' }
   ],
   rarities: [
-    { id: 'common',    label: 'コモン',       color: '#9be23c' },  /* 黄緑 */
-    { id: 'rare',      label: 'レア',         color: '#3b8cff' },  /* 青 */
-    { id: 'epic',      label: 'エピック',     color: '#a259ff' },  /* 紫 */
-    { id: 'legend',    label: 'レジェンド',   color: '#ff9f43' },  /* オレンジ */
-    { id: 'mythic',    label: 'ミシック',     color: '#ff4d4d' },  /* 赤 */
-    { id: 'secret',    label: 'シークレット', color: '#4b4f5c' },  /* 黒(暗い背景で見えるよう少し明るめ) */
-    { id: 'ultimate',  label: 'アルティメット', color: '#ffd24a' }, /* 金色 */
-    { id: 'emperor',   label: 'エンペラー',   color: '#8f1d2c' }   /* 赤黒 */
+    { id: 'common', label: 'コモン', color: '#9be23c' },
+    { id: 'rare', label: 'レア', color: '#3b8cff' },
+    { id: 'epic', label: 'エピック', color: '#a259ff' },
+    { id: 'legend', label: 'レジェンド', color: '#ff9f43' },
+    { id: 'mythic', label: 'ミシック', color: '#ff4d4d' },
+    { id: 'secret', label: 'シークレット', color: '#4b4f5c' },
+    { id: 'ultimate', label: 'アルティメット', color: '#ffd24a' },
+    { id: 'emperor', label: 'エンペラー', color: '#8f1d2c' }
   ],
   mutations: [
-    { id: 'normal',    label: 'ノーマル', color: '#f1f3f8' },  /* 白 */
-    { id: 'silver',    label: 'シルバー', color: '#9aa0ab' },  /* 灰色 */
-    { id: 'gold',      label: 'ゴールド', color: '#ffe14d' },  /* 黄色 */
-    { id: 'diamond',   label: 'ダイヤ',   color: '#5fe0f0' },  /* 水色 */
-    { id: 'lava',      label: 'ラバ',     color: '#ff5a2e' },  /* 赤オレンジ */
-    { id: 'galaxy',    label: 'ギャラ',   color: '#a259ff' },  /* 紫 */
-    { id: 'aqua',      label: 'アクア',   color: '#3b7bff' },  /* ※色の指定なし。仮で青 */
-    { id: 'yggdrasil', label: 'ユグ',     color: '#4cd964' },  /* 緑 */
-    { id: 'halo',      label: 'ハロ',     color: '#ff9f43' }   /* オレンジ */
+    { id: 'normal', label: 'ノーマル', color: '#f1f3f8' },
+    { id: 'silver', label: 'シルバー', color: '#9aa0ab' },
+    { id: 'gold', label: 'ゴールド', color: '#ffe14d' },
+    { id: 'diamond', label: 'ダイヤ', color: '#5fe0f0' },
+    { id: 'lava', label: 'ラバ', color: '#ff5a2e' },
+    { id: 'galaxy', label: 'ギャラ', color: '#a259ff' },
+    { id: 'aqua', label: 'アクア', color: '#3b7bff' },
+    { id: 'yggdrasil', label: 'ユグ', color: '#4cd964' },
+    { id: 'halo', label: 'ハロ', color: '#ff9f43' },
+    { id: 'rainbow', label: '虹', color: '#d946ef' }
   ],
   characters: [
     { id: 'c001', name: 'スライム', rarity: 'common' }, { id: 'c002', name: 'ゴブリン', rarity: 'common' },
@@ -119,32 +115,21 @@ const MASTER = {
   ]
 };
 
-/* Cloudflare Workers API
-   デプロイ後に発行された workers.dev URLへ差し替えてください。 */
 const API_BASE = 'https://trade-value-api.hakuhatu-okuchi.workers.dev';
 
 async function submitTrade(payload) {
-  if (API_BASE.includes('REPLACE_WITH_YOUR_WORKER')) {
-    throw new Error('API_BASE is not configured');
-  }
-
+  if (API_BASE.includes('REPLACE_WITH_YOUR_WORKER')) throw new Error('API_BASE is not configured');
   const res = await fetch(`${API_BASE}/trades`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-
   let data = null;
   try { data = await res.json(); } catch {}
-
-  if (!res.ok || !data?.ok) {
-    throw new Error(data?.error || `HTTP ${res.status}`);
-  }
-
+  if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   return data;
 }
 
-/* ===================== 状態管理 ===================== */
 const M = MASTER, L = M.levels;
 const STEPS = ['type', 'rarity', 'char', 'level', 'mut', 'qty', 'price', 'confirm'];
 const LABEL = { type: '取引タイプ', rarity: 'レアリティ', char: 'キャラクター', level: 'レベル', mut: '変異', qty: '個数', price: '価格', confirm: '確認' };
@@ -175,7 +160,6 @@ function validate(step) {
   return '';
 }
 
-/* ===================== 画面部品 ===================== */
 const opt = (v, html, sel, st = '') => `<button type="button" class="opt" data-v="${v}" aria-pressed="${sel}" style="${st}">${html}</button>`;
 const bar = (back = true, label = '次へ') => `<div class="bar">${back ? '<button type="button" class="btn ghost" data-a="back">戻る</button>' : ''}<button type="button" class="btn primary" data-a="next">${label}</button></div>`;
 const head = (t, sub) => `${isMulti() && S.step !== 'type' ? `<span class="slot">キャラクター ${S.cur + 1} / ${M.maxItems}</span>` : ''}<h2>${t}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}`;
@@ -213,7 +197,6 @@ const VIEWS = {
     <div class="bar"><button type="button" class="btn primary" data-a="reset">最初の画面へ戻る</button></div>`
 };
 
-/* ===================== 描画・操作 ===================== */
 function render(top) {
   const done = S.step === 'done', p = $('#prog');
   p.hidden = done;
