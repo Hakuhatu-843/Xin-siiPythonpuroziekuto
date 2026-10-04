@@ -137,7 +137,6 @@ async function createTrade(request, env) {
 
 async function getTrades(request, env) {
   if (!isAdmin(request, env)) return unauthorized(request);
-
   const url = new URL(request.url);
   const rawLimit = Number(url.searchParams.get("limit") || "50");
   const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
@@ -220,7 +219,6 @@ async function getTrades(request, env) {
 
 async function updateTradeStatus(request, env, tradeId) {
   if (!isAdmin(request, env)) return unauthorized(request);
-
   if (!/^\d+$/.test(tradeId)) {
     return json({ ok: false, error: "Invalid trade id" }, 400, request);
   }
