@@ -522,6 +522,45 @@ async function createMarketSnapshot(env) {
     ).run();
 
     const snapshotId = snapshot.meta?.last_row_id;
+
+    if (snapshotId) {
+      const mutationRows = await env.DB.prepare(
+        `SELECT tc.mutation,
+                COUNT(*) AS sample_count,
+                AVG(CAST(t.total_amount AS REAL) / tc.quantity) AS avg_unit_price
+         FROM trade_characters tc
+         INNER JOIN trades t ON t.id = tc.trade_id
+         WHERE t.status = 'approved'
+           AND tc.character_id = ?
+           AND tc.is_verified = 1
+           AND t.trade_type = 'single'
+         GROUP BY tc.mutation`
+      ).bind(characterId).all();
+
+      const normalRow = (mutationRows.results || []).find(
+        (row) => row.mutation === 'normal' || row.mutation === 'ノーマル'
+      );
+      const normalPrice = Number(normalRow?.avg_unit_price || 0);
+
+      for (const row of mutationRows.results || []) {
+        const avgPrice = Number(row.avg_unit_price || 0);
+        const multiplier = normalPrice > 0
+          ? Math.round((avgPrice / normalPrice) * 100) / 100
+          : null;
+
+        await env.DB.prepare(
+          `INSERT INTO market_snapshot_mutations
+           (snapshot_id, mutation, multiplier, sample_count)
+           VALUES (?, ?, ?, ?)`
+        ).bind(
+          snapshotId,
+          row.mutation,
+          multiplier,
+          Number(row.sample_count || 0)
+        ).run();
+      }
+    }
+
     snapshots.push({
       characterId,
       snapshotId,
