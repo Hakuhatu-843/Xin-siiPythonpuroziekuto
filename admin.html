@@ -17,6 +17,7 @@ button{cursor:pointer}button:hover{border-color:var(--acc)}.tools{display:flex;g
 .meta{color:var(--muted);font-size:12px}.items{padding:10px 14px}.item{padding:8px 0;border-bottom:1px solid #272e40}.item:last-child{border-bottom:0}
 .badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 7px;margin-right:5px;font-size:12px}.verified{color:#70d695}.unverified{color:#ffb36b}
 .empty{padding:30px;text-align:center;color:var(--muted)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.actions button{padding:7px 10px}.approve{border-color:#387a55}.reject{border-color:#8a4444}.back{border-color:#59627a}
 </style>
 </head>
 <body>
@@ -41,8 +42,18 @@ function render(trades){
  list.innerHTML=trades.map(t=>{
    const items=t.items.map(i=>`<div class="item"><span class="badge">#${i.position}</span><b>${esc(i.characterId)}</b> / ${esc(i.rarity)} / Lv.${i.level} / ${esc(i.mutation)} / ×${i.quantity}
    <span class="${i.isVerified?'verified':'unverified'}">[${i.isVerified?'確認済み':'未確認'}]</span></div>`).join('');
-   return `<section class="card"><div class="top"><div><span class="id">取引 #${t.id}</span>　<span class="badge">${TYPE[t.tradeType]||esc(t.tradeType)}</span>　<span class="${t.status}">${STATUS[t.status]||esc(t.status)}</span><div class="meta">${new Date(t.submittedAt).toLocaleString('ja-JP')}</div></div><div class="price">${yen(t.totalPrice)}</div></div><div class="items">${items}</div></section>`;
+   return `<section class="card"><div class="top"><div><span class="id">取引 #${t.id}</span>　<span class="badge">${TYPE[t.tradeType]||esc(t.tradeType)}</span>　<span class="${t.status}">${STATUS[t.status]||esc(t.status)}</span><div class="meta">${new Date(t.submittedAt).toLocaleString('ja-JP')}</div></div><div class="price">${yen(t.totalPrice)}</div></div><div class="items">${items}<div class="actions">${t.status!=='approved'?'<button class="approve" data-id="'+t.id+'" data-status="approved">✓ 承認</button>':''}${t.status!=='rejected'?'<button class="reject" data-id="'+t.id+'" data-status="rejected">✕ 却下</button>':''}${t.status!=='pending'?'<button class="back" data-id="'+t.id+'" data-status="pending">↩ 未確認に戻す</button>':''}</div></div></section>`;
  }).join('');
+}
+async function setStatus(id,status){
+ const labels={approved:'承認',rejected:'却下',pending:'未確認に戻す'};
+ if(!confirm('取引 #'+id+' を「'+labels[status]+'」にしますか？'))return;
+ try{
+  const r=await fetch(API+'/trades/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  const d=await r.json();
+  if(!r.ok||!d.ok)throw new Error(d.error||'更新に失敗しました');
+  await load();
+ }catch(e){alert(e.message)}
 }
 async function load(){
  const status=document.querySelector('#status').value,limit=document.querySelector('#limit').value;
@@ -54,6 +65,7 @@ async function load(){
   render(d.trades);document.querySelector('#info').textContent=`${d.trades.length}件を表示中`;
  }catch(e){document.querySelector('#info').innerHTML='<span class="error">'+esc(e.message)+'</span>'}
 }
+document.querySelector('#list').addEventListener('click',e=>{const b=e.target.closest('button[data-id][data-status]');if(b)setStatus(b.dataset.id,b.dataset.status)});
 document.querySelector('#refresh').onclick=load;document.querySelector('#status').onchange=load;document.querySelector('#limit').onchange=load;load();
 </script>
 </body>
