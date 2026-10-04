@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trade Value 管理画面</title>
+<style>
+:root{color-scheme:dark;--bg:#10131b;--panel:#191e2a;--line:#30384c;--text:#edf0f7;--muted:#98a2b8;--acc:#f2b84b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,"Noto Sans JP",sans-serif}
+.wrap{max-width:1100px;margin:auto;padding:24px 16px 50px}header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:22px;margin:0;color:var(--acc)}button,select{border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:9px;padding:9px 12px}
+button{cursor:pointer}button:hover{border-color:var(--acc)}.tools{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}
+#info{color:var(--muted);margin-bottom:12px}.error{color:#ff8585}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}
+.top{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.id{font-weight:700}.price{font-size:17px;font-weight:700}.pending{color:#f2b84b}.approved{color:#70d695}.rejected{color:#ff8585}
+.meta{color:var(--muted);font-size:12px}.items{padding:10px 14px}.item{padding:8px 0;border-bottom:1px solid #272e40}.item:last-child{border-bottom:0}
+.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 7px;margin-right:5px;font-size:12px}.verified{color:#70d695}.unverified{color:#ffb36b}
+.empty{padding:30px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header><h1>Trade Value 管理画面</h1><button id="refresh">↻ 更新</button></header>
+<div class="tools">
+<select id="status"><option value="">すべて</option><option value="pending">未確認</option><option value="approved">承認済み</option><option value="rejected">却下</option></select>
+<select id="limit"><option value="20">20件</option><option value="50" selected>50件</option><option value="100">100件</option></select>
+</div>
+<div id="info">読み込み中...</div>
+<div id="list"></div>
+</div>
+<script>
+const API='https://trade-value-api.hakuhatu-okuchi.workers.dev';
+const TYPE={single:'単体',bundle:'まとめ買い',set:'セット'};
+const STATUS={pending:'未確認',approved:'承認済み',rejected:'却下'};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const yen=n=>Number(n).toLocaleString('ja-JP');
+function render(trades){
+ const list=document.querySelector('#list');
+ if(!trades.length){list.innerHTML='<div class="empty">取引データがありません</div>';return}
+ list.innerHTML=trades.map(t=>{
+   const items=t.items.map(i=>`<div class="item"><span class="badge">#${i.position}</span><b>${esc(i.characterId)}</b> / ${esc(i.rarity)} / Lv.${i.level} / ${esc(i.mutation)} / ×${i.quantity}
+   <span class="${i.isVerified?'verified':'unverified'}">[${i.isVerified?'確認済み':'未確認'}]</span></div>`).join('');
+   return `<section class="card"><div class="top"><div><span class="id">取引 #${t.id}</span>　<span class="badge">${TYPE[t.tradeType]||esc(t.tradeType)}</span>　<span class="${t.status}">${STATUS[t.status]||esc(t.status)}</span><div class="meta">${new Date(t.submittedAt).toLocaleString('ja-JP')}</div></div><div class="price">${yen(t.totalPrice)}</div></div><div class="items">${items}</div></section>`;
+ }).join('');
+}
+async function load(){
+ const status=document.querySelector('#status').value,limit=document.querySelector('#limit').value;
+ const q=new URLSearchParams({limit});if(status)q.set('status',status);
+ document.querySelector('#info').textContent='読み込み中...';
+ try{
+  const r=await fetch(API+'/trades?'+q);const d=await r.json();
+  if(!r.ok||!d.ok)throw new Error(d.error||'読み込みに失敗しました');
+  render(d.trades);document.querySelector('#info').textContent=`${d.trades.length}件を表示中`;
+ }catch(e){document.querySelector('#info').innerHTML='<span class="error">'+esc(e.message)+'</span>'}
+}
+document.querySelector('#refresh').onclick=load;document.querySelector('#status').onchange=load;document.querySelector('#limit').onchange=load;load();
+</script>
+</body>
+</html>
