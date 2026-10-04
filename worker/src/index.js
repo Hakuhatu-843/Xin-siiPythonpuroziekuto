@@ -594,10 +594,41 @@ async function getMarketSnapshotComparison(env, characterId, currentSnapshotId) 
      LIMIT 1`
   ).bind(characterId, currentSnapshotId).first();
 
+  const mutationCurrent = await env.DB.prepare(
+    `SELECT mutation, multiplier
+     FROM market_snapshot_mutations
+     WHERE snapshot_id = ?`
+  ).bind(currentSnapshotId).all();
+
+  let mutationDirections = {};
+  if (previous) {
+    const mutationPrevious = await env.DB.prepare(
+      `SELECT mutation, multiplier
+       FROM market_snapshot_mutations
+       WHERE snapshot_id = ?`
+    ).bind(previous.id).all();
+
+    const previousMap = new Map(
+      (mutationPrevious.results || []).map((row) => [row.mutation, row.multiplier])
+    );
+
+    for (const row of mutationCurrent.results || []) {
+      mutationDirections[row.mutation] = getChangeDirection(
+        row.multiplier,
+        previousMap.get(row.mutation)
+      );
+    }
+  } else {
+    for (const row of mutationCurrent.results || []) {
+      mutationDirections[row.mutation] = "→";
+    }
+  }
+
   return {
     level1Direction: getChangeDirection(current?.level1_value, previous?.level1_value),
     levelMaxDirection: getChangeDirection(current?.level_max_value, previous?.level_max_value),
     demandDirection: getChangeDirection(current?.demand_score, previous?.demand_score),
+    mutationDirections,
     hasPrevious: Boolean(previous)
   };
 }
