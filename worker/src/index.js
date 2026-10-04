@@ -15,6 +15,15 @@ function corsHeaders(origin) {
   };
 }
 
+function isAdmin(request, env) {
+  const key = request.headers.get("X-Admin-Key");
+  return Boolean(env.ADMIN_KEY && key && key === env.ADMIN_KEY);
+}
+
+function unauthorized(request) {
+  return json({ ok: false, error: "Unauthorized" }, 401, request);
+}
+
 function json(data, status, request) {
   return new Response(JSON.stringify(data), {
     status,
@@ -127,6 +136,8 @@ async function createTrade(request, env) {
 }
 
 async function getTrades(request, env) {
+  if (!isAdmin(request, env)) return unauthorized(request);
+
   const url = new URL(request.url);
   const rawLimit = Number(url.searchParams.get("limit") || "50");
   const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
@@ -208,6 +219,8 @@ async function getTrades(request, env) {
 
 
 async function updateTradeStatus(request, env, tradeId) {
+  if (!isAdmin(request, env)) return unauthorized(request);
+
   if (!/^\d+$/.test(tradeId)) {
     return json({ ok: false, error: "Invalid trade id" }, 400, request);
   }
