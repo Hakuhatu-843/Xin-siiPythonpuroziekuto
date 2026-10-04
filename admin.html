@@ -14,7 +14,7 @@ button{cursor:pointer}button:hover{border-color:var(--acc)}.tools{display:flex;g
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}
 .top{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .id{font-weight:700}.price{font-size:17px;font-weight:700}.pending{color:#f2b84b}.approved{color:#70d695}.rejected{color:#ff8585}
-.meta{color:var(--muted);font-size:12px}.items{padding:10px 14px}.item{padding:8px 0;border-bottom:1px solid #272e40}.item:last-child{border-bottom:0}
+.meta{color:var(--muted);font-size:12px}.items{padding:10px 14px}.item{padding:8px 0;border-bottom:1px solid #272e40}.item:last-child{border-bottom:0}.ip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#c9d2e8}.smallbtn{padding:5px 8px;font-size:12px}
 .badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 7px;margin-right:5px;font-size:12px}.verified{color:#70d695}.unverified{color:#ffb36b}
 .empty{padding:30px;text-align:center;color:var(--muted)}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.actions button{padding:7px 10px}.approve{border-color:#387a55}.reject{border-color:#8a4444}.back{border-color:#59627a}
@@ -28,6 +28,7 @@ button{cursor:pointer}button:hover{border-color:var(--acc)}.tools{display:flex;g
 <select id="limit"><option value="20">20件</option><option value="50" selected>50件</option><option value="100">100件</option></select>
 </div>
 <div id="info">読み込み中...</div>
+<div id="blockedSection" class="card" style="padding:14px"><div style="font-weight:700;margin-bottom:8px">🚫 ブロック中のIP</div><div id="blockedList" class="meta">読み込み中...</div></div>
 <div id="list"></div>
 </div>
 <script>
@@ -36,13 +37,44 @@ const TYPE={single:'単体',bundle:'まとめ買い',set:'セット'};
 const STATUS={pending:'未確認',approved:'承認済み',rejected:'却下'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const yen=n=>Number(n).toLocaleString('ja-JP');
+let blockedIps = new Set();
+
+function renderBlocked(){
+ const el=document.querySelector('#blockedList');
+ if(!blockedIps.size){el.textContent='現在ブロック中のIPはありません';return}
+ el.innerHTML=Array.from(blockedIps).map(ip=>'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:5px 0"><span class="ip">'+esc(ip)+'</span><button class="smallbtn back" data-unblock-ip="'+esc(ip)+'">解除</button></div>').join('');
+}
+
+async function loadBlocked(){
+ const key=getAdminKey(); if(!key)return;
+ try{
+  const r=await fetch(API+'/admin/blocked-ips',{headers:{'X-Admin-Key':key}});
+  const d=await r.json();
+  if(!r.ok||!d.ok)throw new Error(d.error||'ブロック一覧の読み込みに失敗しました');
+  blockedIps=new Set((d.blockedIps||[]).map(x=>x.ip));
+  renderBlocked();
+ }catch(e){document.querySelector('#blockedList').innerHTML='<span class="error">'+esc(e.message)+'</span>'}
+}
+
+async function updateBlockedIp(ip,action){
+ const labels={block:'ブロック',unblock:'ブロック解除'};
+ if(!confirm(ip+' を'+labels[action]+'しますか？'))return;
+ try{
+  const key=getAdminKey(); if(!key)return;
+  const r=await fetch(API+'/admin/blocked-ips',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Key':key},body:JSON.stringify({ip,action})});
+  const d=await r.json();
+  if(!r.ok||!d.ok)throw new Error(d.error||'更新に失敗しました');
+  await Promise.all([load(),loadBlocked()]);
+ }catch(e){alert(e.message)}
+}
+
 function render(trades){
  const list=document.querySelector('#list');
  if(!trades.length){list.innerHTML='<div class="empty">取引データがありません</div>';return}
  list.innerHTML=trades.map(t=>{
    const items=t.items.map(i=>`<div class="item"><span class="badge">#${i.position}</span><b>${esc(i.characterId)}</b> / ${esc(i.rarity)} / Lv.${i.level} / ${esc(i.mutation)} / ×${i.quantity}
    <span class="${i.isVerified?'verified':'unverified'}">[${i.isVerified?'確認済み':'未確認'}]</span></div>`).join('');
-   return `<section class="card"><div class="top"><div><span class="id">取引 #${t.id}</span>　<span class="badge">${TYPE[t.tradeType]||esc(t.tradeType)}</span>　<span class="${t.status}">${STATUS[t.status]||esc(t.status)}</span><div class="meta">${new Date(t.submittedAt).toLocaleString('ja-JP')}</div></div><div class="price">${yen(t.totalPrice)}</div></div><div class="items">${items}<div class="actions">${t.status!=='approved'?'<button class="approve" data-id="'+t.id+'" data-status="approved">✓ 承認</button>':''}${t.status!=='rejected'?'<button class="reject" data-id="'+t.id+'" data-status="rejected">✕ 却下</button>':''}${t.status!=='pending'?'<button class="back" data-id="'+t.id+'" data-status="pending">↩ 未確認に戻す</button>':''}</div></div></section>`;
+   return `<section class="card"><div class="top"><div><span class="id">取引 #${t.id}</span>　<span class="badge">${TYPE[t.tradeType]||esc(t.tradeType)}</span>　<span class="${t.status}">${STATUS[t.status]||esc(t.status)}</span><div class="meta">${new Date(t.submittedAt).toLocaleString('ja-JP')}　IP: <span class="ip">${esc(t.clientIp||'不明')}</span></div></div><div class="price">${yen(t.totalPrice)}</div></div><div class="items">${items}<div class="actions">${t.clientIp?'<button class="reject smallbtn" data-block-ip="'+esc(t.clientIp)+'">🚫 このIPをブロック</button>':''}${t.status!=='approved'?'<button class="approve" data-id="'+t.id+'" data-status="approved">✓ 承認</button>':''}${t.status!=='rejected'?'<button class="reject" data-id="'+t.id+'" data-status="rejected">✕ 却下</button>':''}${t.status!=='pending'?'<button class="back" data-id="'+t.id+'" data-status="pending">↩ 未確認に戻す</button>':''}</div></div></section>`;
  }).join('');
 }
 function getAdminKey(){
@@ -75,9 +107,18 @@ async function load(){
   render(d.trades);document.querySelector('#info').textContent=`${d.trades.length}件を表示中`;
  }catch(e){document.querySelector('#info').innerHTML='<span class="error">'+esc(e.message)+'</span>'}
 }
-document.querySelector('#list').addEventListener('click',e=>{const b=e.target.closest('button[data-id][data-status]');if(b)setStatus(b.dataset.id,b.dataset.status)});
+document.querySelector('#list').addEventListener('click',e=>{
+ const b=e.target.closest('button');
+ if(!b)return;
+ if(b.dataset.id&&b.dataset.status)setStatus(b.dataset.id,b.dataset.status);
+ if(b.dataset.blockIp)updateBlockedIp(b.dataset.blockIp,'block');
+});
+document.querySelector('#blockedList').addEventListener('click',e=>{
+ const b=e.target.closest('button[data-unblock-ip]');
+ if(b)updateBlockedIp(b.dataset.unblockIp,'unblock');
+});
 document.querySelector('#changeKey').onclick=()=>{localStorage.removeItem('tradeValueAdminKey');load()};
-document.querySelector('#refresh').onclick=load;document.querySelector('#status').onchange=load;document.querySelector('#limit').onchange=load;load();
+document.querySelector('#refresh').onclick=()=>{load();loadBlocked()};document.querySelector('#status').onchange=load;document.querySelector('#limit').onchange=load;load();loadBlocked();
 </script>
 </body>
 </html>
