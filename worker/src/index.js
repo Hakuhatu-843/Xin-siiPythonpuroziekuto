@@ -126,6 +126,86 @@ async function createTrade(request, env) {
   }
 }
 
+async function getTrades(request, env) {
+  const url = new URL(request.url);
+  const rawLimit = Number(url.searchParams.get("limit") || "50");
+  const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
+  const status = url.searchParams.get("status");
+
+  if (status && !["pending", "approved", "rejected"].includes(status)) {
+    return json({ ok: false, error: "Invalid status" }, 400, request);
+  }
+
+  const where = status ? "WHERE t.status = ?" : "";
+  const query = `
+    SELECT
+      t.id,
+      t.trade_type,
+      t.total_amount,
+      t.status,
+      t.submitted_at,
+      tc.position,
+      tc.character_id,
+      tc.rarity,
+      tc.level,
+      tc.mutation,
+      tc.quantity,
+      tc.is_verified
+    FROM trades t
+    LEFT JOIN trade_characters tc ON tc.trade_id = t.id
+    ${where}
+    ORDER BY t.id DESC, tc.position ASC
+    LIMIT ?
+  `;
+
+  try {
+    const bindings = status ? [status, limit * 3] : [limit * 3];
+    const result = await env.DB.prepare(query).bind(...bindings).all();
+
+    const trades = new Map();
+
+    for (const row of result.results || []) {
+      if (!trades.has(row.id)) {
+        trades.set(row.id, {
+          id: row.id,
+          tradeType: row.trade_type,
+          totalPrice: row.total_amount,
+          status: row.status,
+          submittedAt: row.submitted_at,
+          items: [],
+        });
+      }
+
+      if (row.position !== null) {
+        trades.get(row.id).items.push({
+          position: row.position,
+          characterId: row.character_id,
+          rarity: row.rarity,
+          level: row.level,
+          mutation: row.mutation,
+          quantity: row.quantity,
+          isVerified: row.is_verified,
+        });
+      }
+
+      if (trades.size >= limit) {
+        const lastId = row.id;
+        const sameTradeRows = result.results.filter((r) => r.id === lastId);
+        if (sameTradeRows.length > 0) continue;
+      }
+    }
+
+    return json(
+      { ok: true, trades: Array.from(trades.values()).slice(0, limit) },
+      200,
+      request
+    );
+  } catch (error) {
+    console.error("getTrades failed", error);
+    return json({ ok: false, error: "Database error" }, 500, request);
+  }
+}
+
 async function getTrade(request, env, tradeId) {
   if (!/^\d+$/.test(tradeId)) {
     return json({ ok: false, error: "Invalid trade id" }, 400, request);
@@ -181,6 +261,10 @@ export default {
 
       if (request.method === "POST" && url.pathname === "/trades") {
         return createTrade(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/trades") {
+        return getTrades(request, env);
       }
 
       const match = url.pathname.match(/^\/trades\/(\d+)$/);
