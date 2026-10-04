@@ -482,6 +482,32 @@ async function createMarketSnapshot(env) {
        WHERE t.status = 'approved' AND tc.character_id = ?`
     ).bind(characterId).first();
 
+    const totalCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS count
+       FROM trade_characters tc
+       INNER JOIN trades t ON t.id = tc.trade_id
+       WHERE t.status = 'approved'`
+    ).first();
+
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const recentCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS count
+       FROM trade_characters tc
+       INNER JOIN trades t ON t.id = tc.trade_id
+       WHERE t.status = 'approved'
+         AND tc.character_id = ?
+         AND t.submitted_at >= ?`
+    ).bind(characterId, since).first();
+
+    const count = Number(tradeCount?.count || 0);
+    const total = Number(totalCount?.count || 0);
+    const recent = Number(recentCount?.count || 0);
+    const shareScore = total > 0 ? (count / total) * 5 : 0;
+    const recentScore = Math.min(recent / 5, 5);
+    const demandScore = Math.round(
+      Math.max(0, Math.min(5, shareScore * 0.6 + recentScore * 0.4)) * 10
+    ) / 10;
+
     const snapshot = await env.DB.prepare(
       `INSERT INTO market_snapshots
        (character_id, level1_value, level_max_value, demand_score, sample_count, created_at)
@@ -490,8 +516,8 @@ async function createMarketSnapshot(env) {
       characterId,
       lv1.value,
       lvMax.value,
-      null,
-      Number(tradeCount?.count || 0),
+      demandScore,
+      count,
       createdAt
     ).run();
 
