@@ -349,6 +349,91 @@ async function updateTradeStatus(request, env, tradeId) {
   }
 }
 
+async function getMarketValue(request, env) {
+  const url = new URL(request.url);
+  const characterId = url.searchParams.get("characterId")?.trim() || "";
+  const mutation = url.searchParams.get("mutation")?.trim() || "";
+  const level = Number(url.searchParams.get("level"));
+
+  if (!characterId || characterId.length > 100) {
+    return json({ ok: false, error: "Invalid characterId" }, 400, request);
+  }
+  if (!mutation || mutation.length > 50) {
+    return json({ ok: false, error: "Invalid mutation" }, 400, request);
+  }
+  if (!Number.isInteger(level) || level < 1 || level > 301) {
+    return json({ ok: false, error: "Invalid level" }, 400, request);
+  }
+
+  try {
+    const result = await env.DB
+      .prepare(
+        `SELECT
+          tc.level,
+          tc.quantity,
+          t.total_amount
+        FROM trades t
+        INNER JOIN trade_characters tc ON tc.trade_id = t.id
+        WHERE t.status = 'approved'
+          AND t.trade_type = 'single'
+          AND tc.character_id = ?
+          AND tc.mutation = ?
+          AND tc.level BETWEEN ? AND ?
+        ORDER BY tc.level ASC`
+      )
+      .bind(characterId, mutation, Math.max(1, level - 20), Math.min(301, level + 20))
+      .all();
+
+    const prices = (result.results || [])
+      .map((row) => Number(row.total_amount) / Number(row.quantity))
+      .filter((price) => Number.isFinite(price) && price > 0)
+      .sort((a, b) => a - b);
+
+    if (prices.length < 3) {
+      return json(
+        {
+          ok: true,
+          status: "insufficient_data",
+          characterId,
+          mutation,
+          level,
+          sampleCount: prices.length,
+          marketValue: null,
+        },
+        200,
+        request
+      );
+    }
+
+    const middle = Math.floor(prices.length / 2);
+    const median =
+      prices.length % 2 === 1
+        ? prices[middle]
+        : (prices[middle - 1] + prices[middle]) / 2;
+
+    return json(
+      {
+        ok: true,
+        status: "ok",
+        characterId,
+        mutation,
+        level,
+        levelRange: {
+          min: Math.max(1, level - 20),
+          max: Math.min(301, level + 20),
+        },
+        sampleCount: prices.length,
+        marketValue: Math.round(median),
+      },
+      200,
+      request
+    );
+  } catch (error) {
+    console.error("getMarketValue failed", error);
+    return json({ ok: false, error: "Database error" }, 500, request);
+  }
+}
+
 async function getTrade(request, env, tradeId) {
   if (!/^\d+$/.test(tradeId)) {
     return json({ ok: false, error: "Invalid trade id" }, 400, request);
@@ -413,6 +498,10 @@ export default {
 
       if (request.method === "GET" && url.pathname === "/trades") {
         return getTrades(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/market-value") {
+        return getMarketValue(request, env);
       }
 
       if (request.method === "GET" && url.pathname === "/admin/blocked-ips") {
