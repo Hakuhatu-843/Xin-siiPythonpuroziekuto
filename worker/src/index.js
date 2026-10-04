@@ -534,6 +534,35 @@ async function createMarketSnapshot(env) {
   return snapshots;
 }
 
+function getChangeDirection(current, previous) {
+  if (current == null || previous == null) return "→";
+  if (current > previous) return "↑";
+  if (current < previous) return "↓";
+  return "→";
+}
+
+async function getMarketSnapshotComparison(env, characterId, currentSnapshotId) {
+  const current = await env.DB.prepare(
+    `SELECT level1_value, level_max_value, demand_score
+     FROM market_snapshots WHERE id = ?`
+  ).bind(currentSnapshotId).first();
+
+  const previous = await env.DB.prepare(
+    `SELECT level1_value, level_max_value, demand_score
+     FROM market_snapshots
+     WHERE character_id = ? AND id < ?
+     ORDER BY created_at DESC
+     LIMIT 1`
+  ).bind(characterId, currentSnapshotId).first();
+
+  return {
+    level1Direction: getChangeDirection(current?.level1_value, previous?.level1_value),
+    levelMaxDirection: getChangeDirection(current?.level_max_value, previous?.level_max_value),
+    demandDirection: getChangeDirection(current?.demand_score, previous?.demand_score),
+    hasPrevious: Boolean(previous)
+  };
+}
+
 async function getTrade(request, env, tradeId) {
   if (!/^\d+$/.test(tradeId)) {
     return json({ ok: false, error: "Invalid trade id" }, 400, request);
