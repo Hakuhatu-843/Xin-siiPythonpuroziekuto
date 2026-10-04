@@ -11,7 +11,7 @@
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 [hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--text);font:500 16px/1.6 "Noto Sans JP",system-ui,sans-serif}
-.wrap{max-width:640px;margin:0 auto;padding:16px 16px 0}
+.wrap{max-width:640px;margin:0 auto;padding:16px 16px 0}.lang{margin-left:auto;position:relative}.lang>button{width:42px;height:42px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--text);font-size:20px;cursor:pointer}.lang>div{position:absolute;right:0;top:48px;z-index:10;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:5px}.lang>div button{display:block;width:120px;padding:9px 12px;border:0;border-radius:7px;background:transparent;color:var(--text);text-align:left;font:600 14px sans-serif;cursor:pointer}
 header{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
 h1{font-size:18px;margin:0;color:var(--acc)}header p{margin:0;color:var(--muted);font-size:14px}
 #prog .segs{display:flex;gap:4px}#prog .segs i{flex:1;height:6px;border-radius:3px;background:var(--line)}
@@ -59,7 +59,7 @@ details{margin:12px 0;color:var(--muted);font-size:13px;text-align:left}pre{over
 </head>
 <body>
 <div class="wrap">
-  <header><h1>Trade Value</h1><p>取引データ入力</p></header>
+  <header><h1>Trade Value</h1><p id="headerSub">取引データ入力</p><div class="lang"><button type="button" id="langBtn" aria-label="言語">🌐</button><div id="langMenu" hidden><button type="button" data-lang="ja">日本語</button><button type="button" data-lang="en">English</button></div></div></header>
   <div id="prog" role="group"></div>
   <main id="app"></main>
 </div>
@@ -134,6 +134,12 @@ const M = MASTER, L = M.levels;
 const STEPS = ['type', 'rarity', 'char', 'level', 'mut', 'qty', 'price', 'confirm'];
 const LABEL = { type: '取引タイプ', rarity: 'レアリティ', char: 'キャラクター', level: 'レベル', mut: '変異', qty: '個数', price: '価格', confirm: '確認' };
 let S;
+let LANG = localStorage.getItem('tradeValueLang') || 'ja';
+const TX = {
+'取引データ入力':'Trade Entry','取引タイプを選択':'Select Trade Type','レアリティを選択':'Select Rarity','キャラクターを選択':'Select Character','レベルを入力':'Enter Level','変異を選択':'Select Mutation','個数を入力':'Enter Quantity','内容を確認':'Confirm Trade','取引データを送信しました':'Trade Submitted','ご協力ありがとうございます。続けて別の取引も入力できます。':'Thank you! You can enter another trade.','最初の画面へ戻る':'Back to Start','次へ':'Next','戻る':'Back','送信する':'Submit','修正する':'Edit','取引タイプ':'Trade Type','レアリティ':'Rarity','キャラクター':'Character','レベル':'Level','変異':'Mutation','個数':'Quantity','価格':'Price','確認':'Confirm','単体':'Single','まとめ買い':'Bundle','セット':'Set','コモン':'Common','レア':'Rare','エピック':'Epic','レジェンド':'Legend','ミシック':'Mythic','シークレット':'Secret','アルティメット':'Ultimate','エンペラー':'Emperor','ノーマル':'Normal','シルバー':'Silver','ゴールド':'Gold','ダイヤ':'Diamond','ラバ':'Lava','ギャラ':'Galaxy','アクア':'Aqua','ユグ':'Yggdrasil','ハロ':'Halo','虹':'Rainbow','取引価格':'Trade Price','まとめ買い全体の価格':'Total Bundle Price','セット全体の価格':'Total Set Price','この取引全体の価格を入力します':'Enter the total price for this trade.','キャラクターごとではなく、全体の価格を1つ入力します':'Enter one total price for all characters.','取引価格は1以上の数値で入力してください':'Enter a price of at least 1.','個数は1以上の整数で入力してください':'Quantity must be a whole number of at least 1.','取引タイプを選んでください':'Please select a trade type.','レアリティを選んでください':'Please select a rarity.','キャラクターを選んでください':'Please select a character.','変更':'Change','削除':'Delete','この内容で送信します':'Submit this trade?','価格入力へ':'Enter Price','該当するキャラクターがいません':'No matching characters.','取引価格に影響するため必須です':'Required because it affects the trade price.','1以上の整数':'Whole number of at least 1','送信に失敗しました。もう一度お試しください':'Submission failed. Please try again.'
+};
+function tr(s){ return LANG === 'ja' ? s : (TX[s] || s); }
+function setLanguage(lang){ LANG=lang; localStorage.setItem('tradeValueLang',lang); document.documentElement.lang=lang; document.title=lang==='ja'?'取引データ入力 | Trade Value':'Trade Entry | Trade Value'; $('#langMenu').hidden=true; $('#headerSub').textContent=tr('取引データ入力'); render(false); }
 const fresh = () => { S = { step: 'type', type: null, items: [], cur: 0, price: '', touched: false, live: false, q: '', fromConfirm: false, last: null }; };
 const $ = s => document.querySelector(s);
 const byId = (a, id) => a.find(x => x.id === id);
@@ -206,6 +212,14 @@ function render(top) {
     p.innerHTML = `<div class="segs">${STEPS.map((s, k) => `<i class="${k < i ? 'd' : k === i ? 'c' : ''}"></i>`).join('')}</div><p><b>${LABEL[S.step]}</b><span>ステップ ${i + 1} / ${STEPS.length}</span></p>`;
   }
   $('#app').innerHTML = VIEWS[S.step]();
+  if (LANG === 'en') {
+    let h = $('#app').innerHTML;
+    Object.keys(TX).forEach(k => { h = h.split(k).join(TX[k]); });
+    h = h.replaceAll('ステップ ', 'Step ');
+    h = h.replaceAll(' / ', ' / ');
+    h = h.replaceAll('キャラクター ', 'Character ');
+    $('#app').innerHTML = h;
+  }
   if (S.step === 'char') fillChars();
   refreshErr();
   if (top) window.scrollTo(0, 0);
@@ -289,6 +303,11 @@ app.addEventListener('input', e => {
 });
 app.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input[data-f]')) { e.preventDefault(); next(); } });
 
+document.documentElement.lang=LANG;
+$('#headerSub').textContent=tr('取引データ入力');
+$('#langBtn').addEventListener('click',()=>{$('#langMenu').hidden=!$('#langMenu').hidden;});
+document.querySelectorAll('[data-lang]').forEach(b=>b.addEventListener('click',()=>setLanguage(b.dataset.lang)));
+document.addEventListener('click',e=>{if(!e.target.closest('.lang'))$('#langMenu').hidden=true;});
 fresh(); render(false);
 </script>
 </body>
