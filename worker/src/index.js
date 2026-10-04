@@ -73,7 +73,41 @@ function validatePayload(body) {
   return null;
 }
 
+function getClientIp(request) {
+  return request.headers.get("CF-Connecting-IP") || null;
+}
+
+async function isBlocked(env, ip) {
+  if (!ip) return false;
+  const row = await env.DB.prepare("SELECT 1 FROM blocked_ips WHERE ip = ?").bind(ip).first();
+  return Boolean(row);
+}
+
+async function isRateLimited(env, ip) {
+  if (!ip) return false;
+  const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const row = await env.DB
+    .prepare("SELECT COUNT(*) AS count FROM trades WHERE client_ip = ? AND submitted_at >= ?")
+    .bind(ip, since)
+    .first();
+  return Number(row?.count || 0) >= 10;
+}
+
 async function createTrade(request, env) {
+  const clientIp = getClientIp(request);
+
+  try {
+    if (await isBlocked(env, clientIp)) {
+      return json({ ok: false, error: "Access blocked" }, 403, request);
+    }
+    if (await isRateLimited(env, clientIp)) {
+      return json({ ok: false, error: "Too many submissions. Please try again later." }, 429, request);
+    }
+  } catch (error) {
+    console.error("abuse check failed", error);
+    return json({ ok: false, error: "Database error" }, 500, request);
+  }
+
   let body;
   try {
     body = await request.json();
@@ -91,9 +125,9 @@ async function createTrade(request, env) {
   try {
     const parent = env.DB
       .prepare(
-        "INSERT INTO trades (trade_type, total_amount, status, submitted_at) VALUES (?, ?, 'pending', ?)"
+        "INSERT INTO trades (trade_type, total_amount, status, submitted_at, client_ip) VALUES (?, ?, 'pending', ?, ?)"
       )
-      .bind(body.tradeType, body.totalPrice, submittedAt);
+      .bind(body.tradeType, body.totalPrice, submittedAt, clientIp);
 
     const statements = [
       parent,
@@ -154,6 +188,7 @@ async function getTrades(request, env) {
       t.total_amount,
       t.status,
       t.submitted_at,
+      t.client_ip,
       tc.position,
       tc.character_id,
       tc.rarity,
@@ -182,6 +217,7 @@ async function getTrades(request, env) {
           totalPrice: row.total_amount,
           status: row.status,
           submittedAt: row.submitted_at,
+          clientIp: row.client_ip,
           items: [],
         });
       }
@@ -216,6 +252,51 @@ async function getTrades(request, env) {
   }
 }
 
+
+async function getBlockedIps(request, env) {
+  if (!isAdmin(request, env)) return unauthorized(request);
+  try {
+    const result = await env.DB
+      .prepare("SELECT ip, blocked_at FROM blocked_ips ORDER BY blocked_at DESC")
+      .all();
+    return json({ ok: true, blockedIps: result.results || [] }, 200, request);
+  } catch (error) {
+    console.error("getBlockedIps failed", error);
+    return json({ ok: false, error: "Database error" }, 500, request);
+  }
+}
+
+async function updateBlockedIp(request, env) {
+  if (!isAdmin(request, env)) return unauthorized(request);
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ ok: false, error: "Invalid JSON" }, 400, request);
+  }
+
+  const ip = typeof body?.ip === "string" ? body.ip.trim() : "";
+  const action = body?.action;
+  if (!ip || ip.length > 45 || !["block", "unblock"].includes(action)) {
+    return json({ ok: false, error: "Invalid IP or action" }, 400, request);
+  }
+
+  try {
+    if (action === "block") {
+      await env.DB
+        .prepare("INSERT OR REPLACE INTO blocked_ips (ip, blocked_at) VALUES (?, ?)")
+        .bind(ip, new Date().toISOString())
+        .run();
+    } else {
+      await env.DB.prepare("DELETE FROM blocked_ips WHERE ip = ?").bind(ip).run();
+    }
+    return json({ ok: true, ip, action }, 200, request);
+  } catch (error) {
+    console.error("updateBlockedIp failed", error);
+    return json({ ok: false, error: "Database error" }, 500, request);
+  }
+}
 
 async function updateTradeStatus(request, env, tradeId) {
   if (!isAdmin(request, env)) return unauthorized(request);
@@ -332,6 +413,14 @@ export default {
 
       if (request.method === "GET" && url.pathname === "/trades") {
         return getTrades(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/blocked-ips") {
+        return getBlockedIps(request, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/admin/blocked-ips") {
+        return updateBlockedIp(request, env);
       }
 
       const match = url.pathname.match(/^\/trades\/(\d+)$/);
