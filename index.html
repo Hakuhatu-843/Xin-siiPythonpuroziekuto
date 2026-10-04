@@ -50,7 +50,7 @@ h2{font-size:22px;line-height:1.4;margin:0 0 4px}
 .card2 .row:last-child{border-bottom:0}
 .link{background:none;border:0;color:var(--acc);font:700 14px "Noto Sans JP",sans-serif;min-height:44px;padding:0 6px;cursor:pointer}
 .link.del{color:var(--err)}
-.price{font-size:26px;color:var(--acc);font-variant-numeric:tabular-nums}.market{margin:14px 0;padding:14px;background:var(--panel2);border:1px solid var(--line);border-radius:12px}.market .label{color:var(--muted);font-size:13px}.market .value{font-size:24px;font-weight:700;color:var(--acc);font-variant-numeric:tabular-nums}.market .note{margin:2px 0 0;color:var(--muted);font-size:13px}
+.price{font-size:26px;color:var(--acc);font-variant-numeric:tabular-nums}
 .done{text-align:center;padding:12px 0 4px}
 .done .ok{width:72px;height:72px;margin:0 auto 12px;border-radius:50%;background:#1f4d3d;color:#6ee7b7;font-size:36px;line-height:72px}
 details{margin:12px 0;color:var(--muted);font-size:13px;text-align:left}pre{overflow-x:auto;background:var(--bg);padding:10px;border-radius:8px;color:var(--text)}
@@ -173,7 +173,7 @@ const VIEWS = {
     `<input class="txt" id="q" type="search" placeholder="キャラクター名で検索" value="${esc(S.q)}" autocomplete="off" aria-label="キャラクター検索"><div id="chars" class="grid c3"></div>` + errP + bar(),
   level: () => head('レベルを入力', '取引価格に影響するため必須です') + num('level', item().level, `${L.min}〜${L.max}`) +
     `<div class="chips">${L.presets.map(p => `<button type="button" class="chip" data-p="${p}">Lv.${p}</button>`).join('')}</div>` + errP + bar(),
-  mut: () => head('変異を選択') + `<div class="grid">${M.mutations.map(m => opt(m.id, m.label, item().mut === m.id, `--c:${m.color}`)).join('')}</div>` + `<div id="market" class="market" aria-live="polite"><div class="label">📊 現在の相場</div><div class="note">変異を選択すると相場を確認します</div></div>` + errP + bar(),
+  mut: () => head('変異を選択') + `<div class="grid">${M.mutations.map(m => opt(m.id, m.label, item().mut === m.id, `--c:${m.color}`)).join('')}</div>` + errP + bar(),
   qty: () => head('個数を入力', '1以上の整数') + num('qty', item().qty, '1') +
     (isMulti() && S.items.length < M.maxItems ? `<button type="button" class="btn wide" data-a="add">＋ キャラクターを追加(${S.items.length}/${M.maxItems})</button>` : '') +
     errP + bar(true, isMulti() ? '価格入力へ' : '次へ'),
@@ -207,7 +207,6 @@ function render(top) {
   }
   $('#app').innerHTML = VIEWS[S.step]();
   if (S.step === 'char') fillChars();
-  if (S.step === 'mut' && item().mut) loadMarketValue();
   refreshErr();
   if (top) window.scrollTo(0, 0);
 }
@@ -216,30 +215,6 @@ function fillChars() {
   const l = M.characters.filter(c => c.rarity === it.rarity && c.name.toLowerCase().includes(q));
   $('#chars').innerHTML = l.length ? l.map(c => opt(c.id, esc(c.name), it.char === c.id, `--c:${byId(M.rarities, it.rarity).color}`)).join('') : '<p class="empty">該当するキャラクターがいません</p>';
 }
-async function loadMarketValue() {
-  const box = $('#market');
-  const it = item();
-  if (!box || !it.char || !it.level || !it.mut) return;
-  box.innerHTML = '<div class="label">📊 現在の相場</div><div class="note">相場を取得中...</div>';
-  try {
-    const params = new URLSearchParams({
-      characterId: it.char,
-      mutation: it.mut,
-      level: String(Number(it.level))
-    });
-    const res = await fetch(`${API_BASE}/market-value?${params}`);
-    const data = await res.json();
-    if (!res.ok || !data?.ok) throw new Error(data?.error || 'market value error');
-    if (data.status === 'ok') {
-      box.innerHTML = `<div class="label">📊 現在の相場</div><div class="value">${fmt(data.marketValue)}</div><div class="note">承認済み単体取引 ${data.sampleCount}件 / Lv.${data.levelRange.min}〜${data.levelRange.max} を参考</div>`;
-    } else {
-      box.innerHTML = `<div class="label">📊 現在の相場</div><div class="note">データ不足（現在 ${data.sampleCount}件）</div>`;
-    }
-  } catch {
-    box.innerHTML = '<div class="label">📊 現在の相場</div><div class="note">相場を取得できませんでした</div>';
-  }
-}
-
 function refreshErr() {
   const el = $('#err'); if (!el || S.step === 'confirm') return;
   const e = validate(S.step), show = (S.touched || S.live) && e;
