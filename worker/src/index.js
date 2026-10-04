@@ -671,6 +671,10 @@ async function getTrade(request, env, tradeId) {
 }
 
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(createMarketSnapshot(env));
+  },
+
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
       return new Response(null, {
