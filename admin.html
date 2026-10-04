@@ -22,7 +22,7 @@ button{cursor:pointer}button:hover{border-color:var(--acc)}.tools{display:flex;g
 </head>
 <body>
 <div class="wrap">
-<header><h1>Trade Value 管理画面</h1><button id="refresh">↻ 更新</button></header>
+<header><h1>Trade Value 管理画面</h1><div><button id="changeKey">🔑 管理キー変更</button> <button id="refresh">↻ 更新</button></div></header>
 <div class="tools">
 <select id="status"><option value="">すべて</option><option value="pending">未確認</option><option value="approved">承認済み</option><option value="rejected">却下</option></select>
 <select id="limit"><option value="20">20件</option><option value="50" selected>50件</option><option value="100">100件</option></select>
@@ -45,27 +45,38 @@ function render(trades){
    return `<section class="card"><div class="top"><div><span class="id">取引 #${t.id}</span>　<span class="badge">${TYPE[t.tradeType]||esc(t.tradeType)}</span>　<span class="${t.status}">${STATUS[t.status]||esc(t.status)}</span><div class="meta">${new Date(t.submittedAt).toLocaleString('ja-JP')}</div></div><div class="price">${yen(t.totalPrice)}</div></div><div class="items">${items}<div class="actions">${t.status!=='approved'?'<button class="approve" data-id="'+t.id+'" data-status="approved">✓ 承認</button>':''}${t.status!=='rejected'?'<button class="reject" data-id="'+t.id+'" data-status="rejected">✕ 却下</button>':''}${t.status!=='pending'?'<button class="back" data-id="'+t.id+'" data-status="pending">↩ 未確認に戻す</button>':''}</div></div></section>`;
  }).join('');
 }
+function getAdminKey(){
+ let key=localStorage.getItem('tradeValueAdminKey');
+ if(!key){
+  key=prompt('管理キーを入力してください');
+  if(key)localStorage.setItem('tradeValueAdminKey',key);
+ }
+ return key||'';
+}
 async function setStatus(id,status){
  const labels={approved:'承認',rejected:'却下',pending:'未確認に戻す'};
  if(!confirm('取引 #'+id+' を「'+labels[status]+'」にしますか？'))return;
  try{
-  const r=await fetch(API+'/trades/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
+  const key=getAdminKey(); if(!key)return;
+  const r=await fetch(API+'/trades/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Key':key},body:JSON.stringify({status})});
   const d=await r.json();
   if(!r.ok||!d.ok)throw new Error(d.error||'更新に失敗しました');
   await load();
  }catch(e){alert(e.message)}
 }
 async function load(){
+ const key=getAdminKey(); if(!key){document.querySelector('#info').textContent='管理キーが必要です';return;}
  const status=document.querySelector('#status').value,limit=document.querySelector('#limit').value;
  const q=new URLSearchParams({limit});if(status)q.set('status',status);
  document.querySelector('#info').textContent='読み込み中...';
  try{
-  const r=await fetch(API+'/trades?'+q);const d=await r.json();
+  const r=await fetch(API+'/trades?'+q,{headers:{'X-Admin-Key':key}});const d=await r.json();
   if(!r.ok||!d.ok)throw new Error(d.error||'読み込みに失敗しました');
   render(d.trades);document.querySelector('#info').textContent=`${d.trades.length}件を表示中`;
  }catch(e){document.querySelector('#info').innerHTML='<span class="error">'+esc(e.message)+'</span>'}
 }
 document.querySelector('#list').addEventListener('click',e=>{const b=e.target.closest('button[data-id][data-status]');if(b)setStatus(b.dataset.id,b.dataset.status)});
+document.querySelector('#changeKey').onclick=()=>{localStorage.removeItem('tradeValueAdminKey');load()};
 document.querySelector('#refresh').onclick=load;document.querySelector('#status').onchange=load;document.querySelector('#limit').onchange=load;load();
 </script>
 </body>
