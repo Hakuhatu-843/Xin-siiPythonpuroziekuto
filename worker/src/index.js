@@ -434,6 +434,80 @@ async function getMarketValue(request, env) {
   }
 }
 
+async function calculateMarketForCharacter(env, characterId, level) {
+  const result = await env.DB.prepare(
+    `SELECT tc.quantity, t.total_amount
+     FROM trades t
+     INNER JOIN trade_characters tc ON tc.trade_id = t.id
+     WHERE t.status = 'approved'
+       AND t.trade_type = 'single'
+       AND tc.character_id = ?
+       AND tc.level BETWEEN ? AND ?`
+  ).bind(characterId, Math.max(1, level - 20), Math.min(301, level + 20)).all();
+
+  const prices = (result.results || [])
+    .map((row) => Number(row.total_amount) / Number(row.quantity))
+    .filter((price) => Number.isFinite(price) && price > 0)
+    .sort((a, b) => a - b);
+
+  if (prices.length < 3) {
+    return { value: null, sampleCount: prices.length };
+  }
+
+  const middle = Math.floor(prices.length / 2);
+  const median = prices.length % 2 === 1
+    ? prices[middle]
+    : (prices[middle - 1] + prices[middle]) / 2;
+
+  return { value: Math.round(median), sampleCount: prices.length };
+}
+
+async function createMarketSnapshot(env) {
+  const chars = await env.DB.prepare(
+    "SELECT DISTINCT character_id FROM trade_characters WHERE is_verified = 1"
+  ).all();
+
+  const createdAt = new Date().toISOString();
+  const snapshots = [];
+
+  for (const row of chars.results || []) {
+    const characterId = row.character_id;
+    const lv1 = await calculateMarketForCharacter(env, characterId, 1);
+    const lvMax = await calculateMarketForCharacter(env, characterId, 301);
+
+    const tradeCount = await env.DB.prepare(
+      `SELECT COUNT(*) AS count
+       FROM trade_characters tc
+       INNER JOIN trades t ON t.id = tc.trade_id
+       WHERE t.status = 'approved' AND tc.character_id = ?`
+    ).bind(characterId).first();
+
+    const snapshot = await env.DB.prepare(
+      `INSERT INTO market_snapshots
+       (character_id, level1_value, level_max_value, demand_score, sample_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(
+      characterId,
+      lv1.value,
+      lvMax.value,
+      null,
+      Number(tradeCount?.count || 0),
+      createdAt
+    ).run();
+
+    const snapshotId = snapshot.meta?.last_row_id;
+    snapshots.push({
+      characterId,
+      snapshotId,
+      level1Value: lv1.value,
+      levelMaxValue: lvMax.value,
+      sampleCount: Number(tradeCount?.count || 0)
+    });
+  }
+
+  return snapshots;
+}
+
 async function getTrade(request, env, tradeId) {
   if (!/^\d+$/.test(tradeId)) {
     return json({ ok: false, error: "Invalid trade id" }, 400, request);
