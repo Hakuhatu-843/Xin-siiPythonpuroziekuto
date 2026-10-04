@@ -582,12 +582,12 @@ function getChangeDirection(current, previous) {
 
 async function getMarketSnapshotComparison(env, characterId, currentSnapshotId) {
   const current = await env.DB.prepare(
-    `SELECT level1_value, level_max_value, demand_score
+    `SELECT id, level1_value, level_max_value, demand_score
      FROM market_snapshots WHERE id = ?`
   ).bind(currentSnapshotId).first();
 
   const previous = await env.DB.prepare(
-    `SELECT level1_value, level_max_value, demand_score
+    `SELECT id, level1_value, level_max_value, demand_score
      FROM market_snapshots
      WHERE character_id = ? AND id < ?
      ORDER BY created_at DESC
