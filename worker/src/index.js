@@ -401,6 +401,79 @@ async function updateTradeStatus(request, env, tradeId) {
   } catch (error) { console.error("updateTradeStatus failed", error); return json({ ok: false, error: "Database error" }, 500, request); }
 }
 
+async function getMarketSnapshot(request, env) {
+  const url = new URL(request.url);
+  const characterNumber = url.searchParams.get("characterNumber")?.trim() || "";
+  const characterName = url.searchParams.get("characterName")?.trim() || "";
+
+  if (Boolean(characterNumber) === Boolean(characterName)) {
+    return json({ ok: false, error: "Provide characterNumber or characterName" }, 400, request);
+  }
+  if (characterNumber && !/^\\d{3}$/.test(characterNumber)) {
+    return json({ ok: false, error: "Invalid character number" }, 400, request);
+  }
+
+  try {
+    const character = characterNumber
+      ? await env.DB.prepare(
+          "SELECT character_number, english_name, japanese_name FROM characters WHERE character_number = ? AND is_tradable = 1"
+        ).bind(characterNumber).first()
+      : await env.DB.prepare(
+          "SELECT character_number, english_name, japanese_name FROM characters WHERE is_tradable = 1 AND (japanese_name = ? OR english_name = ?) LIMIT 1"
+        ).bind(characterName, characterName).first();
+
+    if (!character) {
+      return json(
+        { ok: false, error: characterNumber ? "Character number not found" : "Character not found" },
+        404,
+        request
+      );
+    }
+
+    const snapshot = await env.DB.prepare(
+      "SELECT id, level1_value, level_max_value, demand_score, sample_count, level1_sample_count, level_max_sample_count, created_at FROM market_snapshots WHERE character_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+    ).bind(character.character_number).first();
+
+    if (!snapshot) {
+      return json({ ok: false, error: "Market snapshot not found" }, 404, request);
+    }
+
+    const changes = await getMarketSnapshotComparison(
+      env,
+      character.character_number,
+      snapshot.id
+    );
+    const mutationRows = await env.DB.prepare(
+      "SELECT mutation, multiplier, sample_count FROM market_snapshot_mutations WHERE snapshot_id = ? ORDER BY mutation"
+    ).bind(snapshot.id).all();
+
+    return json({
+      ok: true,
+      characterNumber: character.character_number,
+      characterId: character.character_number,
+      characterName: character.japanese_name,
+      englishName: character.english_name,
+      level1Value: snapshot.level1_value,
+      levelMaxValue: snapshot.level_max_value,
+      demandScore: snapshot.demand_score,
+      sampleCount: Number(snapshot.sample_count || 0),
+      level1SampleCount: snapshot.level1_sample_count == null ? null : Number(snapshot.level1_sample_count),
+      levelMaxSampleCount: snapshot.level_max_sample_count == null ? null : Number(snapshot.level_max_sample_count),
+      createdAt: snapshot.created_at,
+      changes,
+      mutations: (mutationRows.results || []).map((row) => ({
+        mutation: row.mutation,
+        multiplier: row.multiplier,
+        sampleCount: Number(row.sample_count || 0),
+        direction: changes.mutationDirections[row.mutation] || "→"
+      }))
+    }, 200, request);
+  } catch (error) {
+    console.error("getMarketSnapshot failed", error);
+    return json({ ok: false, error: "Database error" }, 500, request);
+  }
+}
+
 async function getMarketValue(request, env) {
   const url = new URL(request.url);
   const characterId = url.searchParams.get("characterId")?.trim() || "";
@@ -562,14 +635,17 @@ async function createMarketSnapshot(env) {
 
     const snapshot = await env.DB.prepare(
       `INSERT INTO market_snapshots
-       (character_id, level1_value, level_max_value, demand_score, sample_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       (character_id, level1_value, level_max_value, demand_score, sample_count,
+        level1_sample_count, level_max_sample_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       characterId,
       lv1.value,
       lvMax.value,
       demandScore,
       count,
+      lv1.sampleCount,
+      lvMax.sampleCount,
       createdAt
     ).run();
 
@@ -774,6 +850,10 @@ export default {
 
       if (request.method === "GET" && url.pathname === "/trades") {
         return getTrades(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/market-snapshot") {
+        return getMarketSnapshot(request, env);
       }
 
       if (request.method === "GET" && url.pathname === "/market-value") {
