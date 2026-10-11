@@ -11,13 +11,13 @@ body{margin:0;background:var(--bg);color:var(--text);font:500 16px/1.6 system-ui
 .wrap{max-width:680px;margin:0 auto;padding:16px}
 header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
 h1{font-size:20px;color:var(--acc);margin:0}#language{margin-left:auto}
-a,.link{color:var(--acc)}.link{background:none;border:0;font:700 14px inherit;cursor:pointer;padding:8px}
+a,.link{color:var(--acc)}.link{background:none;border:0;font:700 14px system-ui,-apple-system,"Noto Sans JP",sans-serif;cursor:pointer;padding:8px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin:12px 0}
 h2{font-size:19px;margin:0 0 4px}.sub,.note{color:var(--muted);font-size:14px;margin:0 0 16px}
 label{display:block;font-size:14px;color:var(--muted);margin:14px 0 6px}
 input,select{width:100%;min-height:50px;border:2px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);padding:0 12px;font:inherit}
 input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
-button.primary{width:100%;min-height:54px;margin-top:18px;border:0;border-radius:11px;background:var(--acc);color:#1b1403;font:700 17px inherit;cursor:pointer}
+button.primary{width:100%;min-height:54px;margin-top:18px;border:0;border-radius:11px;background:var(--acc);color:#1b1403;font:700 17px system-ui,-apple-system,"Noto Sans JP",sans-serif;cursor:pointer}
 button:disabled{opacity:.55;cursor:wait}
 #result{min-height:100px;display:flex;flex-direction:column;justify-content:center;gap:6px}
 .price{font-size:clamp(30px,8vw,44px);line-height:1.2;font-weight:800;color:var(--acc);overflow-wrap:anywhere}
@@ -96,7 +96,7 @@ $('rarity').innerHTML=rarities.map(r=>'<option value="'+r.id+'">'+r[language]+'<
 $('mutation').innerHTML=mutations.map(m=>'<option value="'+m.id+'">'+m[language]+'</option>').join('');
 if(rarities.some(r=>r.id===oldR))$('rarity').value=oldR;
 if(mutations.some(m=>m.id===oldM))$('mutation').value=oldM;
-if(!$('result').dataset.searched)$('result').innerHTML='<p class="muted">'+t('placeholder')+'</p>';
+if($('result').dataset.searched){lookup();}else{$('result').innerHTML='<p class="muted">'+t('placeholder')+'</p>';}
 renderCharacters();
 }
 function renderCharacters(){
