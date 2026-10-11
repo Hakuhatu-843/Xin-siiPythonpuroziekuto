@@ -171,7 +171,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 const tr = value => Array.isArray(value) ? value[S.language === 'ja' ? 0 : 1] : value;
 const t = (ja, en) => S.language === 'ja' ? ja : en;
 const tType = () => S.type ? byId(M.tradeTypes, S.type) : null;
-const isMulti = () => !!(tType() && tType().multi);
+const isMulti = () => S.action === 'trade' || !!(tType() && tType().multi);
 const activeSteps = () => S.action === 'trade'
   ? STEPS.filter(step => step !== 'type' && step !== 'price')
   : STEPS.filter(step => step !== 'exchange');
