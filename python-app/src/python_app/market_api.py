@@ -284,7 +284,7 @@ def get_characters(
         rarity = row.get("rarity")
         if (
             not isinstance(number, str)
-            or re.fullmatch(r"\\d{3}", number) is None
+            or re.fullmatch(r"\d{3}", number) is None
             or number in seen_numbers
             or not isinstance(english_name, str)
             or not english_name.strip()
