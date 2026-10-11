@@ -66,6 +66,55 @@ async function isRateLimited(env, ip) {
   return Number(row?.count || 0) >= 10;
 }
 
+async function isInSubmissionCooldown(env, ip) {
+  if (!ip) return false;
+  const row = await env.DB.prepare(
+    "SELECT MAX(submitted_at) AS last_at FROM (SELECT submitted_at FROM trades WHERE client_ip=? UNION ALL SELECT submitted_at FROM exchanges WHERE client_ip=?)"
+  ).bind(ip, ip).first();
+  if (!row?.last_at) return false;
+  const elapsed = Date.now() - Date.parse(row.last_at);
+  return Number.isFinite(elapsed) && elapsed < 5000;
+}
+
+async function submissionFingerprint(kind, body) {
+  const canonical = {
+    kind,
+    tradeType: kind === "trade" ? body.tradeType : null,
+    totalPrice: kind === "trade" ? body.totalPrice : null,
+    exchangeDescription: kind === "exchange" ? body.exchangeDescription.trim() : null,
+    items: body.items.map((item) => ({
+      characterNumber: item.characterNumber,
+      rarity: item.rarity,
+      level: item.level,
+      mutation: item.mutation,
+      quantity: item.quantity
+    }))
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(canonical));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function registerRepeatedSubmission(env, ip, fingerprint, now) {
+  if (!ip) return false;
+  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  await env.DB.prepare(
+    "INSERT INTO repeated_submissions (ip, fingerprint, hit_count, first_seen, last_seen) VALUES (?, ?, 1, ?, ?) " +
+    "ON CONFLICT(ip, fingerprint) DO UPDATE SET " +
+    "hit_count = CASE WHEN repeated_submissions.last_seen >= ? THEN repeated_submissions.hit_count + 1 ELSE 1 END, " +
+    "first_seen = CASE WHEN repeated_submissions.last_seen >= ? THEN repeated_submissions.first_seen ELSE excluded.first_seen END, " +
+    "last_seen = excluded.last_seen"
+  ).bind(ip, fingerprint, now, now, cutoff, cutoff).run();
+  const row = await env.DB.prepare(
+    "SELECT hit_count FROM repeated_submissions WHERE ip=? AND fingerprint=?"
+  ).bind(ip, fingerprint).first();
+  if (Number(row?.hit_count || 0) < 4) return false;
+  await env.DB.prepare(
+    "INSERT OR REPLACE INTO blocked_ips (ip, blocked_at) VALUES (?, ?)"
+  ).bind(ip, now).run();
+  return true;
+}
+
 async function validateCatalogItems(env, items) {
   for (const item of items) {
     const row = await env.DB.prepare("SELECT rarity, is_tradable FROM characters WHERE character_number = ?")
@@ -99,6 +148,13 @@ async function createTrade(request, env) {
     const existing = await env.DB.prepare("SELECT id, status, submitted_at FROM trades WHERE submission_id = ?").bind(body.submissionId).first();
     if (existing) return json({ ok: true, tradeId: existing.id, status: existing.status, submittedAt: existing.submitted_at, duplicate: true }, 200, request);
     const submittedAt = new Date().toISOString();
+    const fingerprint = await submissionFingerprint("trade", body);
+    if (await registerRepeatedSubmission(env, ip, fingerprint, submittedAt)) {
+      return json({ ok: false, error: "Repeated identical submissions blocked this IP." }, 403, request);
+    }
+    if (await isInSubmissionCooldown(env, ip)) {
+      return json({ ok: false, error: "Please wait 5 seconds before submitting again." }, 429, request);
+    }
     const statements = [
       env.DB.prepare("INSERT INTO trades (submission_id, trade_type, total_amount, status, submitted_at, client_ip) VALUES (?, ?, ?, 'pending', ?, ?)")
         .bind(body.submissionId, body.tradeType, body.totalPrice, submittedAt, ip),
@@ -177,6 +233,13 @@ async function createExchange(request, env) {
     const existing = await env.DB.prepare("SELECT id,status,submitted_at FROM exchanges WHERE submission_id=?").bind(body.submissionId).first();
     if (existing) return json({ ok: true, exchangeId: existing.id, status: existing.status, submittedAt: existing.submitted_at, duplicate: true }, 200, request);
     const submittedAt = new Date().toISOString();
+    const fingerprint = await submissionFingerprint("exchange", body);
+    if (await registerRepeatedSubmission(env, ip, fingerprint, submittedAt)) {
+      return json({ ok: false, error: "Repeated identical submissions blocked this IP." }, 403, request);
+    }
+    if (await isInSubmissionCooldown(env, ip)) {
+      return json({ ok: false, error: "Please wait 5 seconds before submitting again." }, 429, request);
+    }
     const statements = [
       env.DB.prepare("INSERT INTO exchanges (submission_id,exchange_description,status,submitted_at,client_ip) VALUES (?,?,'pending',?,?)")
         .bind(body.submissionId, body.exchangeDescription.trim(), submittedAt, ip),
