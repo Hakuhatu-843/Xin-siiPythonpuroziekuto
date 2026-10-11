@@ -15,6 +15,10 @@ def snapshot_payload():
         "level1Value": 50000,
         "levelMaxValue": None,
         "demandScore": 3.4,
+        "acquiredCount": 5,
+        "exchangeAcquiredCount": 2,
+        "givenCount": 1,
+        "demandDelta": -1,
         "sampleCount": 8,
         "level1SampleCount": 5,
         "levelMaxSampleCount": 2,
@@ -87,6 +91,10 @@ class MarketAPITests(unittest.TestCase):
         self.assertEqual(result.level1_value, 50000)
         self.assertIsNone(result.level_max_value)
         self.assertEqual(result.demand_score, 3.4)
+        self.assertEqual(result.acquired_count, 5)
+        self.assertEqual(result.exchange_acquired_count, 2)
+        self.assertEqual(result.given_count, 1)
+        self.assertEqual(result.demand_delta, -1)
         self.assertEqual(result.level1_sample_count, 5)
         self.assertEqual(result.level_max_sample_count, 2)
         self.assertEqual(result.level1_direction, "↑")
