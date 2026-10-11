@@ -17,10 +17,10 @@
 <header><div><h1>Trade Value — 取引統計</h1><p class="muted">データの蓄積状況を確認します。</p></div><a class="back" href="./admin.html">審査ページへ</a></header>
 <section id="auth-panel" class="panel auth">
 <h2>審査担当者の認証</h2>
-<p class="notice">統計データの閲覧には審査専用キーが必要です。キーはこのページのメモリ内だけで使用し、保存しません。</p>
+<p class="notice">本番Workerの管理キーが必要です。キーはこのページのメモリ内だけで使用し、保存しません。信頼できる端末でのみ使用してください。</p>
 <form id="auth-form">
 <label for="reviewer">担当者名（表示用）</label><input id="reviewer" maxlength="100" autocomplete="off" required>
-<label for="key">審査専用キー</label><input id="key" type="password" autocomplete="off" spellcheck="false" required>
+<label for="key">Worker管理キー</label><input id="key" type="password" autocomplete="off" spellcheck="false" required>
 <p id="auth-error" class="error" role="alert"></p>
 <div class="actions"><button type="submit" id="login-button">統計を読み込む</button></div>
 </form>
@@ -49,7 +49,7 @@
 (() => {
   const API = "https://trade-value-api.hakuhatu-okuchi.workers.dev";
   const $ = (id) => document.getElementById(id);
-  let reviewKey = "";
+  let adminKey = "";
   let characters = [];
   const fmt = (n) => Number(n || 0).toLocaleString("ja-JP");
   const safeText = (value) => String(value ?? "");
@@ -103,13 +103,13 @@
     $("auth-error").textContent = "";
     try {
       const response = await fetch(API + "/admin/statistics", {
-        headers: { "X-Review-Key": reviewKey },
+        headers: { "X-Admin-Key": adminKey },
         cache: "no-store"
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.ok) {
         if (response.status === 401) {
-          reviewKey = "";
+          adminKey = "";
           $("dashboard").classList.add("hidden");
           $("auth-panel").classList.remove("hidden");
           $("auth-error").textContent = "認証に失敗しました。キーを確認してください。";
@@ -151,7 +151,7 @@
     event.preventDefault();
     const key = $("key").value.trim();
     if (!key) return;
-    reviewKey = key;
+    adminKey = key;
     $("login-button").disabled = true;
     await loadStatistics();
   });
