@@ -2113,7 +2113,7 @@ def create_bot() -> PythonAppBot:
             self.page_size = 25
             self.refresh_items()
 
-        def make_embed(self) -> discord.Embed:
+        def make_content(self) -> str:
             start_index = self.page * self.page_size
             entries = self.characters[start_index:start_index + self.page_size]
             page_count = max(1, (len(self.characters) + self.page_size - 1) // self.page_size)
@@ -2136,13 +2136,13 @@ def create_bot() -> PythonAppBot:
                 )
                 for item in entries
             ]
-            embed = discord.Embed(
-                title=f"Character Number List ({self.page + 1}/{page_count})",
-                description="```ansi\n" + "\n".join(colored_lines) + "\n```",
-                color=discord.Color.blurple(),
+            return (
+                f"**Character Number List ({self.page + 1}/{page_count})**\n"
+                + "```ansi\n"
+                + "\n".join(colored_lines)
+                + "\n```\n"
+                + f"*{len(self.characters)} tradable characters · Worker catalog*"
             )
-            embed.set_footer(text=f"{len(self.characters)} tradable characters · Worker catalog")
-            return embed
 
         def refresh_items(self) -> None:
             self.clear_items()
@@ -2162,12 +2162,12 @@ def create_bot() -> PythonAppBot:
         async def go_previous(self, interaction: discord.Interaction) -> None:
             self.page = max(0, self.page - 1)
             self.refresh_items()
-            await interaction.response.edit_message(embed=self.make_embed(), view=self)
+            await interaction.response.edit_message(content=self.make_content(), embed=None, view=self)
 
         async def go_next(self, interaction: discord.Interaction) -> None:
             self.page = min((len(self.characters) - 1) // self.page_size, self.page + 1)
             self.refresh_items()
-            await interaction.response.edit_message(embed=self.make_embed(), view=self)
+            await interaction.response.edit_message(content=self.make_content(), embed=None, view=self)
 
     @bot.tree.command(
         name="market",
@@ -2209,7 +2209,7 @@ def create_bot() -> PythonAppBot:
             return
         view = CharacterNumberListView(characters)
         await interaction.followup.send(
-            embed=view.make_embed(), view=view, ephemeral=False
+            content=view.make_content(), view=view, ephemeral=False
         )
 
     @bot.tree.command(
