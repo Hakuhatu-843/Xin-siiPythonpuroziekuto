@@ -601,9 +601,14 @@ async function createMarketSnapshot(env) {
 
   const createdAt = new Date().toISOString();
   const snapshots = [];
+  console.log("createMarketSnapshot started", {
+    characterCount: (chars.results || []).length,
+    createdAt
+  });
 
   for (const row of chars.results || []) {
     const characterId = row.character_id;
+    console.log("createMarketSnapshot character started", { characterId });
     const lv1 = await calculateMarketForCharacter(env, characterId, 1);
     const lvMax = await calculateMarketForCharacter(env, characterId, 301);
 
@@ -707,8 +712,16 @@ async function createMarketSnapshot(env) {
       levelMaxValue: lvMax.value,
       sampleCount: Number(tradeCount?.count || 0)
     });
+    console.log("createMarketSnapshot character completed", {
+      characterId,
+      snapshotId
+    });
   }
 
+  console.log("createMarketSnapshot completed", {
+    processedCount: snapshots.length,
+    createdAt
+  });
   return snapshots;
 }
 
@@ -811,7 +824,15 @@ async function getTrade(request, env, tradeId) {
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(createMarketSnapshot(env));
+    console.log("Scheduled market snapshot triggered", {
+      scheduledTime: event?.scheduledTime,
+      cron: event?.cron
+    });
+    ctx.waitUntil(
+      createMarketSnapshot(env).catch((error) => {
+        console.error("Scheduled market snapshot failed", error);
+      })
+    );
   },
 
   async fetch(request, env) {
