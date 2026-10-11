@@ -41,6 +41,7 @@ function validatePayload(body) {
     if (typeof item.characterNumber !== "string" || !/^\d{3}$/.test(item.characterNumber) ||
         typeof item.rarity !== "string" || item.rarity.length < 1 || item.rarity.length > 50 ||
         typeof item.mutation !== "string" || item.mutation.length < 1 || item.mutation.length > 50 ||
+        !["acquired", "given"].includes(body.direction) ||
         !Number.isInteger(item.level) || item.level < 1 || item.level > 301 ||
         !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 9999) return "Invalid trade item";
   }
@@ -87,7 +88,8 @@ async function submissionFingerprint(kind, body) {
       rarity: item.rarity,
       level: item.level,
       mutation: item.mutation,
-      quantity: item.quantity
+      quantity: item.quantity,
+      direction: kind === "exchange" ? "acquired" : body.direction || null
     }))
   };
   const bytes = new TextEncoder().encode(JSON.stringify(canonical));
@@ -158,8 +160,8 @@ async function createTrade(request, env) {
     const statements = [
       env.DB.prepare("INSERT INTO trades (submission_id, trade_type, total_amount, status, submitted_at, client_ip) VALUES (?, ?, ?, 'pending', ?, ?)")
         .bind(body.submissionId, body.tradeType, body.totalPrice, submittedAt, ip),
-      ...body.items.map((item, i) => env.DB.prepare("INSERT INTO trade_characters (trade_id, position, character_id, rarity, level, mutation, quantity, is_verified) SELECT id, ?, ?, ?, ?, ?, ?, 0 FROM trades WHERE submission_id = ?")
-        .bind(i + 1, item.characterNumber, item.rarity, item.level, item.mutation, item.quantity, body.submissionId))
+      ...body.items.map((item, i) => env.DB.prepare("INSERT INTO trade_characters (trade_id, position, character_id, rarity, level, mutation, quantity, direction, is_verified) SELECT id, ?, ?, ?, ?, ?, ?, ?, 0 FROM trades WHERE submission_id = ?")
+        .bind(i + 1, item.characterNumber, item.rarity, item.level, item.mutation, item.quantity, body.direction, body.submissionId))
     ];
     const result = await env.DB.batch(statements);
     const tradeId = result?.[0]?.meta?.last_row_id;
@@ -193,13 +195,13 @@ async function getTrades(request, env) {
     const through = page.through === null ? Number(maxRow?.id || 0) : page.through;
     const result = await env.DB.prepare(
       "WITH page AS (SELECT id, trade_type, total_amount, status, submitted_at, reviewed_by, reviewed_at, client_ip FROM trades WHERE status = ? AND id > ? AND id <= ? ORDER BY id ASC LIMIT ?) " +
-      "SELECT p.id,p.trade_type,p.total_amount,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,p.client_ip,tc.position,tc.character_id,tc.rarity,tc.level,tc.mutation,tc.quantity,tc.is_verified,c.japanese_name " +
+      "SELECT p.id,p.trade_type,p.total_amount,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,p.client_ip,tc.position,tc.character_id,tc.rarity,tc.level,tc.mutation,tc.quantity,tc.direction,tc.is_verified,c.japanese_name " +
       "FROM page p LEFT JOIN trade_characters tc ON tc.trade_id=p.id LEFT JOIN characters c ON c.character_number=tc.character_id ORDER BY p.id ASC,tc.position ASC"
     ).bind(status, page.after, through, page.limit + 1).all();
     const map = new Map();
     for (const row of result.results || []) {
       if (!map.has(row.id)) map.set(row.id, { id: row.id, tradeType: row.trade_type, totalPrice: row.total_amount, status: row.status, submittedAt: row.submitted_at, reviewedBy: row.reviewed_by, reviewedAt: row.reviewed_at, clientIp: row.client_ip, items: [] });
-      if (row.position !== null) map.get(row.id).items.push({ position: row.position, characterId: row.character_id, characterNumber: row.character_id, characterName: row.japanese_name || row.character_id, rarity: row.rarity, level: row.level, mutation: row.mutation, quantity: row.quantity, isVerified: row.is_verified });
+      if (row.position !== null) map.get(row.id).items.push({ position: row.position, characterId: row.character_id, characterNumber: row.character_id, characterName: row.japanese_name || row.character_id, rarity: row.rarity, level: row.level, mutation: row.mutation, quantity: row.quantity, direction: row.direction || "acquired", isVerified: row.is_verified });
     }
     const all = [...map.values()], hasMore = all.length > page.limit, trades = all.slice(0, page.limit);
     return json({ ok: true, trades, throughCursor: through, hasMore, nextCursor: hasMore ? trades[trades.length - 1].id : null }, 200, request);
@@ -243,8 +245,8 @@ async function createExchange(request, env) {
     const statements = [
       env.DB.prepare("INSERT INTO exchanges (submission_id,exchange_description,status,submitted_at,client_ip) VALUES (?,?,'pending',?,?)")
         .bind(body.submissionId, body.exchangeDescription.trim(), submittedAt, ip),
-      ...body.items.map((item, i) => env.DB.prepare("INSERT INTO exchange_characters (exchange_id,position,character_id,rarity,level,mutation,quantity,is_verified) SELECT id,?,?,?,?,?,?,0 FROM exchanges WHERE submission_id=?")
-        .bind(i + 1, item.characterNumber, item.rarity, item.level, item.mutation, item.quantity, body.submissionId))
+      ...body.items.map((item, i) => env.DB.prepare("INSERT INTO exchange_characters (exchange_id,position,character_id,rarity,level,mutation,quantity,direction,is_verified) SELECT id,?,?,?,?,?,?,?,0 FROM exchanges WHERE submission_id=?")
+        .bind(i + 1, item.characterNumber, item.rarity, item.level, item.mutation, item.quantity, "acquired", body.submissionId))
     ];
     const result = await env.DB.batch(statements), exchangeId = result?.[0]?.meta?.last_row_id;
     if (!exchangeId) throw new Error("D1 did not return an exchange id");
@@ -268,7 +270,7 @@ async function getExchanges(request, env) {
     const through = page.through === null ? Number(maxRow?.id || 0) : page.through;
     const result = await env.DB.prepare(
       "WITH page AS (SELECT id,exchange_description,status,submitted_at,reviewed_by,reviewed_at,client_ip FROM exchanges WHERE status=? AND id>? AND id<=? ORDER BY id ASC LIMIT ?) " +
-      "SELECT p.id,p.exchange_description,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,p.client_ip,ec.position,ec.character_id,ec.rarity,ec.level,ec.mutation,ec.quantity,ec.is_verified,c.japanese_name " +
+      "SELECT p.id,p.exchange_description,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,p.client_ip,ec.position,ec.character_id,ec.rarity,ec.level,ec.mutation,ec.quantity,ec.direction,ec.is_verified,c.japanese_name " +
       "FROM page p LEFT JOIN exchange_characters ec ON ec.exchange_id=p.id LEFT JOIN characters c ON c.character_number=ec.character_id ORDER BY p.id ASC,ec.position ASC"
     ).bind(status, page.after, through, page.limit + 1).all();
     const map = new Map();
@@ -589,7 +591,7 @@ async function calculateMarketForCharacter(env, characterId, level) {
 
 async function createMarketSnapshot(env) {
   const chars = await env.DB.prepare(
-    "SELECT DISTINCT character_id FROM trade_characters WHERE is_verified = 1"
+    "SELECT character_number AS character_id FROM characters WHERE is_tradable = 1 ORDER BY character_number"
   ).all();
 
   const createdAt = new Date().toISOString();
