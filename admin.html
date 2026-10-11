@@ -349,7 +349,8 @@
     }
 
     async function decide(kind, record, status, actions) {
-      if (loading || record.status !== 'pending') return;
+      if (loading || (record.status === 'pending' && status === 'pending') ||
+          (record.status !== 'pending' && status !== 'pending')) return;
       const actionName = status === 'approved' ? '承認' : status === 'rejected' ? '却下' : '審査の取り消し';
       const confirmation = status === 'pending'
         ? `投稿 #${record.id} の審査結果を取り消して、審査待ちに戻しますか？相場への反映対象から外れます。`
