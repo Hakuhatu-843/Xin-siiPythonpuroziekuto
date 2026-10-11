@@ -2129,10 +2129,10 @@ def create_bot() -> PythonAppBot:
             }
             colored_lines = [
                 (
-                    f"chr(27)[{rarity_ansi_colors.get(item.rarity, '37')}m"
+                    f"{chr(27)}[{rarity_ansi_colors.get(item.rarity, '37')}m"
                     f"{item.character_number} — "
                     f"{discord.utils.escape_markdown(item.english_name)}"
-                    f"chr(27)[0m"
+                    f"{chr(27)}[0m"
                 )
                 for item in entries
             ]
