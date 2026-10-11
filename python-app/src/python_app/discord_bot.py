@@ -1970,7 +1970,7 @@ def create_bot() -> PythonAppBot:
             )
         lines.extend([
             "",
-            f"需要対象取引: {snapshot.sample_count}件",
+            f"承認済み価格取引の明細数: {snapshot.sample_count}件",
             f"更新日時: {snapshot.created_at}",
             "※ ↑上昇 / ↓下落 / →変化なし（または比較データなし）",
         ])
