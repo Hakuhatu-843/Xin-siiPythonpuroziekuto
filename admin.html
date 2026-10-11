@@ -223,6 +223,7 @@
         ['レベル', item.level == null ? null : `Lv.${item.level}`],
         ['ミューテーション', item.mutation],
         ['個数', item.quantity],
+        ['自分の立場', item.direction === 'acquired' ? '入手した（買い）' : item.direction === 'given' ? '手放した（売り）' : '旧データ・不明'],
         ['確認状態', item.isVerified == null ? null : (item.isVerified ? '確認済み' : '未確認')]
       ];
       for (const [label, value] of fields) {
@@ -250,7 +251,10 @@
       const details = el('details');
       details.append(el('summary', '投稿内容の詳細'));
       const body = el('div', undefined, 'items');
-      if (kind === 'exchange') body.append(el('p', record.exchangeDescription || '交換内容なし'));
+      if (kind === 'exchange') {
+        body.append(el('p', '選択したキャラクター: 入手した（交換で受け取った）'));
+        body.append(el('p', `交換内容（手放したもの）: ${record.exchangeDescription || '未入力'}`));
+      }
       for (const [index, item] of (Array.isArray(record.items) ? record.items : []).entries()) {
         body.append(renderItem(item, index));
       }
