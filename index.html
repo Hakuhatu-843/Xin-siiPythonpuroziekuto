@@ -133,6 +133,8 @@ async function submitTrade(payload, endpoint = '/trades') {
     const errors = {
       'Character number not found': ['未登録のキャラクター番号です。', 'That character number is not registered.'],
       'Too many submissions. Please try again later.': ['送信回数が上限に達しました。時間をおいて再度お試しください。', 'Too many submissions. Please try again later.'],
+      'Please wait 5 seconds before submitting again.': ['連続送信を防ぐため、5秒待ってから再送信してください。', 'Please wait 5 seconds before submitting again.'],
+      'Repeated identical submissions blocked this IP.': ['同じ内容の連続送信が検出されたため、このIPからの送信を制限しました。', 'Repeated identical submissions blocked this IP.'],
       'Access blocked': ['このネットワークからの送信は制限されています。', 'Submissions from this network are restricted.'],
       'Invalid total price': ['取引価格を確認してください。', 'Check the trade price.'],
       'Invalid exchange description': ['交換内容を入力してください。', 'Enter the exchange details.'],
@@ -156,6 +158,8 @@ const LABEL = {
   price: ['価格', 'Price'], confirm: ['確認', 'Review']
 };
 let S;
+let submitCooldownUntil = 0;
+let submitCooldownTimer = null;
 const fresh = () => { S = { step: 'type', type: null, items: [], cur: 0, price: '', exchangeDescription: '', touched: false, live: false, q: '', fromConfirm: false, last: null, submissionId: null, language: S?.language || 'ja', charactersLoaded: false, charactersError: false }; };
 const $ = s => document.querySelector(s);
 const byId = (a, id) => a.find(x => x.id === id);
@@ -172,6 +176,9 @@ const newItem = () => ({ rarity: null, char: null, level: '', mut: null, qty: '1
 const get = f => f === 'price' ? S.price : item()[f];
 const set = (f, v) => { if (f === 'price') S.price = v; else item()[f] = v; };
 const fmt = n => Number(n).toLocaleString(S.language === 'ja' ? 'ja-JP' : 'en-US');
+const characterDisplayName = character => S.language === 'ja'
+  ? (character.characterName || character.englishName || character.characterNumber)
+  : (character.englishName || character.characterName || character.characterNumber);
 
 function validate(step) {
   const it = S.items[S.cur];
@@ -207,14 +214,14 @@ const VIEWS = {
     (isMulti() && S.items.length < M.maxItems ? `<button type="button" class="btn wide" data-a="add">＋ ${t('キャラクターを追加', 'Add character')} (${S.items.length}/${M.maxItems})</button>` : '') +
     errP + bar(true, isMulti() ? t('価格入力へ', 'Enter price') : t('次へ', 'Next')),
   price: () => head(`${tr(tType().priceLabel)}${t('を入力', '')}`, isMulti() ? t('キャラクターごとではなく、全体の価格を1つ入力します', 'Enter one total price, not a price per character.') : t('この取引全体の価格を入力します', 'Enter the total price for this trade.')) +
-    `<input class="txt" data-f="price" inputmode="numeric" autocomplete="off" placeholder="${t('例: 15000', 'e.g. 15000')}" value="${S.price}" aria-label="${tr(tType().priceLabel)}"><p class="preview" id="pv">${S.price ? fmt(S.price) : ''}</p>` + errP + bar(),
+    `<input class="txt" data-f="price" inputmode="numeric" autocomplete="off" placeholder="${t('例: 15000', 'Example: 15000')}" value="${S.price}" aria-label="${tr(tType().priceLabel)}"><p class="preview" id="pv">${S.price ? fmt(S.price) : ''}</p>` + errP + bar(),
   exchange: () => head(t('交換内容を入力', 'Describe the exchange'), t('価格は入力・保存せず、交換内容を相場計算にも含めません', 'No price is entered or stored, and exchanges are excluded from market calculations.')) +
     `<textarea class="txt" id="exchange-description" maxlength="1000" rows="4" aria-label="${t('交換内容', 'Exchange details')}" placeholder="${t('例: フェニックスとの交換', 'e.g. Exchange for a Phoenix')}">${esc(S.exchangeDescription)}</textarea>` + errP + bar(),
   confirm: () => {
     const tradeType = tType();
     const items = S.items.map((it, i) => {
       const r = byId(M.rarities, it.rarity), c = M.characters.find(character => character.characterNumber === it.char), m = byId(M.mutations, it.mut);
-      return `<div class="card2" style="--c:${r.color}"><div class="row"><b>${esc(c.characterNumber)} / ${esc(c.characterName)} (${tr(r.label)})</b><span>${isMulti() && S.items.length > 1 ? `<button type="button" class="link del" data-a="del" data-i="${i}">${t('削除', 'Remove')}</button>` : ''}<button type="button" class="link" data-a="edit" data-to="rarity" data-i="${i}">${t('変更', 'Edit')}</button></span></div>
+      return `<div class="card2" style="--c:${r.color}"><div class="row"><b>${esc(c.characterNumber)} / ${esc(characterDisplayName(c))} (${tr(r.label)})</b><span>${isMulti() && S.items.length > 1 ? `<button type="button" class="link del" data-a="del" data-i="${i}">${t('削除', 'Remove')}</button>` : ''}<button type="button" class="link" data-a="edit" data-to="rarity" data-i="${i}">${t('変更', 'Edit')}</button></span></div>
         <div class="row"><span>${t('レベル', 'Level')}</span><b>Lv.${it.level}</b></div><div class="row"><span>${t('変異', 'Mutation')}</span><b>${tr(m.label)}</b></div><div class="row"><span>${t('個数', 'Quantity')}</span><b>×${fmt(it.qty)}</b></div></div>`;
     }).join('');
     return `<h2>${t('内容を確認', 'Review trade')}</h2><p class="sub">${t('この内容で送信します', 'Submit this trade with the details below.')}</p>
@@ -225,8 +232,7 @@ const VIEWS = {
       <p class="err" id="err" role="alert"></p>
       <div class="bar"><button type="button" class="btn ghost" data-a="fix">${t('修正する', 'Edit trade')}</button><button type="button" class="btn primary" data-a="submit">${t('送信する', 'Submit')}</button></div>`;
   },
-  done: () => `<div class="done"><div class="ok" aria-hidden="true">✓</div><h2>${t('取引データを送信しました', 'Trade submitted')}</h2><p class="sub">${t('ご協力ありがとうございます。取引は審査後に相場へ反映されます。', 'Thank you. Your trade will be considered for market data after review.')}</p>
-    <p>${t('受付番号', 'Submission ID')}: ${esc(S.last?.tradeId || S.last?.exchangeId || '')}</p></div>
+  done: () => `<div class="done"><div class="ok" aria-hidden="true">✓</div><h2>${t('取引データを送信しました', 'Trade submitted')}</h2><p class="sub">${t('ご協力ありがとうございます。取引は審査後に相場へ反映されます。', 'Thank you. Your trade will be considered for market data after review.')}</p></div>
     <div class="bar"><button type="button" class="btn primary" data-a="reset">${t('最初の画面へ戻る', 'Start another trade')}</button></div>`
 };
 
@@ -255,9 +261,9 @@ function fillChars() {
     return;
   }
   const l = M.characters.filter(c => c.rarity === it.rarity &&
-    `${c.characterNumber} ${c.characterName}`.toLowerCase().includes(q));
+    `${c.characterNumber} ${c.characterName || ''} ${c.englishName || ''}`.toLowerCase().includes(q));
   $('#chars').innerHTML = l.length
-    ? l.map(c => opt(c.characterNumber, `${esc(c.characterNumber)} / ${esc(c.characterName)}`, it.char === c.characterNumber, `--c:${byId(M.rarities, it.rarity).color}`)).join('')
+    ? l.map(c => opt(c.characterNumber, `${esc(c.characterNumber)} / ${esc(characterDisplayName(c))}`, it.char === c.characterNumber, `--c:${byId(M.rarities, it.rarity).color}`)).join('')
     : `<p class="empty">${t('該当するキャラクターがいません', 'No matching characters.')}</p>`;
 }
 async function loadCharacters() {
@@ -325,11 +331,39 @@ function back() {
   if (S.step === 'price') S.cur = S.items.length - 1;
   go(steps[i - 1]);
 }
+function startSubmitCooldown(btn) {
+  submitCooldownUntil = Date.now() + 5000;
+  if (submitCooldownTimer !== null) window.clearTimeout(submitCooldownTimer);
+  const originalLabel = t('送信する', 'Submit');
+  const tick = () => {
+    const remaining = Math.max(0, submitCooldownUntil - Date.now());
+    if (!btn.isConnected) {
+      if (remaining > 0) submitCooldownTimer = window.setTimeout(tick, Math.min(250, remaining));
+      else submitCooldownTimer = null;
+      return;
+    }
+    if (remaining > 0) {
+      btn.disabled = true;
+      btn.textContent = `${originalLabel} (${Math.ceil(remaining / 1000)}s)`;
+      submitCooldownTimer = window.setTimeout(tick, Math.min(250, remaining));
+    } else {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+      submitCooldownTimer = null;
+    }
+  };
+  tick();
+}
+
 async function submit(btn) {
-  btn.disabled = true;
+  if (Date.now() < submitCooldownUntil) {
+    btn.disabled = true;
+    $('#err').textContent = t('送信クールタイム中です。少し待ってください。', 'Submission cooldown active. Please wait a moment.');
+    return;
+  }
+  startSubmitCooldown(btn);
   if (!S.submissionId) {
     if (!globalThis.crypto?.randomUUID) {
-      btn.disabled = false;
       $('#err').textContent = t('安全な送信IDを作成できません。HTTPSで開き直してください。', 'A secure submission ID could not be created. Open this page over HTTPS.');
       return;
     }
@@ -343,7 +377,7 @@ async function submit(btn) {
   else Object.assign(payload, { tradeType: S.type, totalPrice: Number(S.price) });
   S.last = payload;
   try { S.last = { ...S.last, ...await submitTrade(S.last, S.type === 'exchange' ? '/exchanges' : '/trades') }; go('done'); }
-  catch (e) { btn.disabled = false; $('#err').textContent = e instanceof Error ? e.message : t('送信に失敗しました。もう一度お試しください。', 'Submission failed. Please try again.'); }
+  catch (e) { $('#err').textContent = e instanceof Error ? e.message : t('送信に失敗しました。もう一度お試しください。', 'Submission failed. Please try again.'); }
 }
 
 const app = $('#app');
