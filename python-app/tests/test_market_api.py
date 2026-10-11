@@ -4,7 +4,7 @@ from io import BytesIO
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from python_app.market_api import MarketAPIError, get_market_snapshot
+from python_app.market_api import MarketAPIError, get_characters, get_market_snapshot
 
 
 def snapshot_payload():
@@ -52,6 +52,28 @@ class FakeResponse:
 
 
 class MarketAPITests(unittest.TestCase):
+
+    @patch("python_app.market_api.urlopen")
+    def test_fetches_canonical_character_catalog(self, urlopen):
+        urlopen.return_value = FakeResponse({
+            "ok": True,
+            "characters": [
+                {"characterNumber": "002", "characterName": "ピピ・ウォーターメロン", "englishName": "Pipi Watermelon", "rarity": "common"},
+                {"characterNumber": "001", "characterName": "フルリフルラ", "englishName": "Fluriflura", "rarity": "common"},
+            ],
+        })
+        result = get_characters(base_url="https://worker.example/")
+        self.assertEqual([(item.character_number, item.english_name) for item in result], [("001", "Fluriflura"), ("002", "Pipi Watermelon")])
+        self.assertEqual(result[0].japanese_name, "フルリフルラ")
+        request, = urlopen.call_args.args
+        self.assertEqual(request.full_url, "https://worker.example/characters")
+
+    @patch("python_app.market_api.urlopen")
+    def test_rejects_invalid_character_catalog_number(self, urlopen):
+        urlopen.return_value = FakeResponse({"ok": True, "characters": [{"characterNumber": "A001", "characterName": "管理用キャラ", "englishName": "Management Character", "rarity": "ancient"}]})
+        with self.assertRaisesRegex(MarketAPIError, "不正な項目"):
+            get_characters()
+
     @patch("python_app.market_api.urlopen")
     def test_fetches_and_decodes_snapshot(self, urlopen):
         urlopen.return_value = FakeResponse(snapshot_payload())
