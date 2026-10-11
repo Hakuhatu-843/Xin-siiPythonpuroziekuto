@@ -1893,34 +1893,6 @@ def create_bot() -> PythonAppBot:
             view=TradeEntryView(),
         )
 
-    @bot.tree.command(
-        name="set_trade_review_channel",
-        description="Web取引の審査通知チャンネルを設定します。",
-    )
-    async def set_trade_review_channel(
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-    ) -> None:
-        if not _is_guild_administrator(interaction):
-            await interaction.response.send_message(
-                "この設定はサーバー管理者のみ実行できます。",
-                ephemeral=True,
-            )
-            return
-        try:
-            configure_worker_trade_review_channel(str(channel.id))
-        except sqlite3.Error:
-            logger.exception("Web取引の審査チャンネルを保存できませんでした。")
-            await interaction.response.send_message(
-                "審査チャンネルを保存できませんでした。時間をおいて再度お試しください。",
-                ephemeral=True,
-            )
-            return
-        await interaction.response.send_message(
-            f"Web取引の審査通知先を {channel.mention} に設定しました。",
-            ephemeral=True,
-        )
-
     MARKET_RARITIES = (
         ("common", "Common / コモン"),
         ("rare", "Rare / レア"),
