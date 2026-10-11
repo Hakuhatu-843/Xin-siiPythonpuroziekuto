@@ -433,7 +433,7 @@ async function getMarketSnapshot(request, env) {
     }
 
     const snapshot = await env.DB.prepare(
-      "SELECT id, level1_value, level_max_value, demand_score, sample_count, level1_sample_count, level_max_sample_count, created_at FROM market_snapshots WHERE character_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
+      "SELECT id, level1_value, level_max_value, demand_score, sample_count, level1_sample_count, level_max_sample_count, acquired_count, exchange_acquired_count, given_count, demand_delta, created_at FROM market_snapshots WHERE character_id = ? ORDER BY created_at DESC, id DESC LIMIT 1"
     ).bind(character.character_number).first();
 
     if (!snapshot) {
@@ -458,6 +458,11 @@ async function getMarketSnapshot(request, env) {
       level1Value: snapshot.level1_value,
       levelMaxValue: snapshot.level_max_value,
       demandScore: snapshot.demand_score,
+      acquiredCount: snapshot.acquired_count == null ? null : Number(snapshot.acquired_count),
+      exchangeAcquiredCount: snapshot.exchange_acquired_count == null ? null : Number(snapshot.exchange_acquired_count),
+      givenCount: snapshot.given_count == null ? null : Number(snapshot.given_count),
+      demandCount: snapshot.acquired_count == null || snapshot.exchange_acquired_count == null ? null : Number(snapshot.acquired_count) + Number(snapshot.exchange_acquired_count),
+      demandDelta: snapshot.demand_delta == null ? null : Number(snapshot.demand_delta),
       sampleCount: Number(snapshot.sample_count || 0),
       level1SampleCount: snapshot.level1_sample_count == null ? null : Number(snapshot.level1_sample_count),
       levelMaxSampleCount: snapshot.level_max_sample_count == null ? null : Number(snapshot.level_max_sample_count),
