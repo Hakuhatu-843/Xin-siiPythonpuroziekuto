@@ -218,7 +218,7 @@ const VIEWS = {
   mut: () => head(t('変異を選択', 'Choose mutation')) + `<div class="grid">${M.mutations.map(m => opt(m.id, tr(m.label), item().mut === m.id, `--c:${m.color}`)).join('')}</div>` + errP + bar(),
   qty: () => head(t('個数を入力', 'Enter quantity'), t('1以上の整数', 'Positive integer')) + num('qty', item().qty, '1') +
     (isMulti() && S.items.length < M.maxItems ? `<button type="button" class="btn wide" data-a="add">＋ ${t('キャラクターを追加', 'Add character')} (${S.items.length}/${M.maxItems})</button>` : '') +
-    errP + bar(true, isMulti() ? t('価格入力へ', 'Enter price') : t('次へ', 'Next')),
+    errP + bar(true, S.action === 'trade' ? t('交換内容へ', 'Enter exchange details') : isMulti() ? t('価格入力へ', 'Enter price') : t('次へ', 'Next')),
   price: () => head(`${tr(tType().priceLabel)}${t('を入力', '')}`, isMulti() ? t('キャラクターごとではなく、全体の価格を1つ入力します', 'Enter one total price, not a price per character.') : t('この取引全体の価格を入力します', 'Enter the total price for this trade.')) +
     `<input class="txt" data-f="price" inputmode="numeric" autocomplete="off" placeholder="${t('例: 15000', 'Example: 15000')}" value="${S.price}" aria-label="${tr(tType().priceLabel)}"><p class="preview" id="pv">${S.price ? fmt(S.price) : ''}</p>` + errP + bar(),
   exchange: () => head(t('交換内容を入力', 'Describe the exchange'), t('価格は入力・保存せず、交換内容を相場計算にも含めません', 'No price is entered or stored, and exchanges are excluded from market calculations.')) +
@@ -321,13 +321,13 @@ function choose(v) {
 }
 function next() {
   S.touched = true;
-  if (S.step === 'action' && !validate('action') && S.action !== 'trade' && !S.items.length) S.items = [newItem()];
+  if (S.step === 'action' && !validate('action') && !S.items.length) S.items = [newItem()];
   if (S.step === 'type' && !validate('type')) { if (!S.items.length) S.items = [newItem()]; if (!isMulti()) S.items.length = 1; S.cur = Math.min(S.cur, S.items.length - 1); }
   const e = validate(S.step); if (e) { refreshErr(); return; }
   const steps = activeSteps();
   let to = steps[steps.indexOf(S.step) + 1];
   if (S.fromConfirm) {
-    if (S.step === 'action') to = S.action === 'trade' ? 'exchange' : 'confirm';
+    if (S.step === 'action') to = S.action === 'trade' ? 'exchange' : (!S.type || S.type === 'exchange' ? 'type' : 'confirm');
     else if (S.step === 'type') to = 'confirm';
     else if (S.step === 'rarity' && !item().char) to = 'char';
     else to = 'confirm';
