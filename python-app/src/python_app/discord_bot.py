@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Mapping, Sequence
@@ -14,12 +15,7 @@ from urllib.parse import quote
 import discord
 from discord import app_commands
 
-from .market import (
-    calculate_mutation_multiplier,
-    estimate_market_price,
-    load_character_market_observations,
-    load_verified_character_observations,
-)
+from .market_api import MarketAPIError, get_market_snapshot
 from .character_names import (
     CharacterNameResolution,
     UnverifiedNameReview,
@@ -36,8 +32,18 @@ from .character_names import (
     set_review_notification_message,
     set_unverified_channel,
 )
+from .trade_review_api import (
+    ReviewExchange,
+    ReviewTrade,
+    TradeReviewAPIError,
+    get_pending_exchanges,
+    get_pending_trades,
+    update_exchange_status,
+    update_trade_status,
+)
 
 TOKEN_ENV_VAR = "DISCORD_TOKEN"
+WORKER_ADMIN_KEY_ENV_VAR = "WORKER_ADMIN_KEY"
 TRANSACTION_TYPES = ("通常", "単体", "まとめ買い", "セット")
 DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "trades.sqlite3"
 logger = logging.getLogger(__name__)
@@ -172,6 +178,26 @@ def initialize_database(db_path: str | Path = DATABASE_PATH) -> None:
             )
 
         initialize_character_name_schema(connection)
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worker_trade_notifications (
+                trade_id INTEGER PRIMARY KEY,
+                discord_channel_id TEXT NOT NULL,
+                discord_message_id TEXT NOT NULL,
+                notified_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS worker_exchange_notifications (
+                exchange_id INTEGER PRIMARY KEY,
+                discord_channel_id TEXT NOT NULL,
+                discord_message_id TEXT NOT NULL,
+                notified_at TEXT NOT NULL
+            )
+            """
+        )
         connection.commit()
     except Exception:
         connection.rollback()
@@ -473,6 +499,106 @@ def get_configured_unverified_name_channel(
         return get_unverified_channel(connection)
 
 
+def configure_worker_trade_review_channel(
+    channel_id: str,
+    db_path: str | Path = DATABASE_PATH,
+) -> None:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO bot_settings (setting_key, setting_value)
+            VALUES ('worker_trade_review_channel_id', ?)
+            ON CONFLICT(setting_key)
+            DO UPDATE SET setting_value = excluded.setting_value
+            """,
+            (channel_id,),
+        )
+
+
+def get_worker_trade_review_channel(
+    db_path: str | Path = DATABASE_PATH,
+) -> str | None:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT setting_value FROM bot_settings
+            WHERE setting_key = 'worker_trade_review_channel_id'
+            """
+        ).fetchone()
+    return str(row[0]) if row is not None else None
+
+
+def get_worker_trade_notification_ids(
+    db_path: str | Path = DATABASE_PATH,
+) -> list[tuple[int, str]]:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT trade_id, discord_message_id
+            FROM worker_trade_notifications
+            """
+        ).fetchall()
+    return [(int(trade_id), str(message_id)) for trade_id, message_id in rows]
+
+
+def record_worker_trade_notification(
+    trade_id: int,
+    channel_id: str,
+    message_id: str,
+    db_path: str | Path = DATABASE_PATH,
+) -> None:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO worker_trade_notifications (
+                trade_id, discord_channel_id, discord_message_id, notified_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (trade_id, channel_id, message_id, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def get_worker_exchange_notification_ids(
+    db_path: str | Path = DATABASE_PATH,
+) -> list[tuple[int, str]]:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT exchange_id, discord_message_id
+            FROM worker_exchange_notifications
+            """
+        ).fetchall()
+    return [(int(exchange_id), str(message_id)) for exchange_id, message_id in rows]
+
+
+def record_worker_exchange_notification(
+    exchange_id: int,
+    channel_id: str,
+    message_id: str,
+    db_path: str | Path = DATABASE_PATH,
+) -> None:
+    initialize_database(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO worker_exchange_notifications (
+                exchange_id, discord_channel_id, discord_message_id, notified_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (
+                exchange_id,
+                channel_id,
+                message_id,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+
 def record_unverified_name_notification(
     review_id: int,
     message_id: str,
@@ -699,6 +825,17 @@ def format_recent_trades(
 def _is_guild_administrator(interaction: discord.Interaction) -> bool:
     permissions = getattr(interaction.user, "guild_permissions", None)
     return bool(permissions and permissions.administrator)
+
+
+def _can_review_worker_trades(interaction: discord.Interaction) -> bool:
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    if permissions and (permissions.administrator or permissions.manage_guild):
+        return True
+    reviewer_role_id = os.environ.get("WORKER_REVIEW_ROLE_ID", "").strip()
+    if not reviewer_role_id:
+        return False
+    roles = getattr(interaction.user, "roles", ())
+    return any(str(role.id) == reviewer_role_id for role in roles)
 
 
 def format_unverified_name_notification(
@@ -962,6 +1099,320 @@ async def publish_pending_unverified_name_notifications(
         if await publish_unverified_name_notification(client, review, db_path):
             sent += 1
     return sent
+
+
+def format_worker_trade_notification(trade: ReviewTrade) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"Web取引の審査 #{trade.trade_id}",
+        description=(
+            f"状態: 未審査\n"
+            f"形式: {_escape_for_discord(trade.trade_type)}\n"
+            f"取引価格: {trade.total_price:,}\n"
+            f"受付日時: {_escape_for_discord(trade.submitted_at)[:50]}"
+        ),
+        color=discord.Color.gold(),
+    )
+    for item_index, item in enumerate(trade.items, start=1):
+        character = item.character_name or item.character_id
+        if item.character_number:
+            character = f"{item.character_number} / {character}"
+        embed.add_field(
+            name=f"キャラクター {item_index}",
+            value="\n".join(
+                [
+                    f"**{_escape_for_discord(character)[:100]}**",
+                    f"レアリティ: {_escape_for_discord(item.rarity)[:40]}",
+                    f"レベル: {item.level}",
+                    f"変異: {_escape_for_discord(item.mutation)[:40]}",
+                    f"個数: {item.quantity}",
+                ]
+            ),
+            inline=False,
+        )
+    return embed
+
+
+class WorkerTradeReviewView(discord.ui.View):
+    """Persistent approval controls for a pending Worker trade."""
+
+    def __init__(self, trade_id: int) -> None:
+        super().__init__(timeout=None)
+        self.trade_id = trade_id
+
+    async def _decide(
+        self,
+        interaction: discord.Interaction,
+        status: str,
+    ) -> None:
+        if not _can_review_worker_trades(interaction):
+            await interaction.response.send_message(
+                "この操作を実行する権限がありません。",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        admin_key = os.environ.get(WORKER_ADMIN_KEY_ENV_VAR, "").strip()
+        try:
+            await asyncio.to_thread(
+                update_trade_status,
+                self.trade_id,
+                status,
+                reviewer_id=str(interaction.user.id),
+                admin_key=admin_key,
+            )
+        except TradeReviewAPIError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            if "すでに審査" in str(error) and interaction.message is not None:
+                await interaction.message.edit(view=None)
+            return
+        except (discord.HTTPException, OSError):
+            logger.exception("Worker取引の審査操作に失敗しました。")
+            await interaction.followup.send(
+                "審査結果を保存できませんでした。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+            return
+
+        result_label = "承認" if status == "approved" else "拒否"
+        if interaction.message is not None:
+            await interaction.message.edit(
+                content=f"取引 #{self.trade_id} は{result_label}されました。",
+                view=None,
+            )
+        await interaction.followup.send(
+            f"取引 #{self.trade_id} を{result_label}しました。",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="承認",
+        style=discord.ButtonStyle.success,
+        custom_id="worker_trade_review:approve",
+    )
+    async def approve(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[discord.ui.View],
+    ) -> None:
+        await self._decide(interaction, "approved")
+
+    @discord.ui.button(
+        label="拒否",
+        style=discord.ButtonStyle.danger,
+        custom_id="worker_trade_review:reject",
+    )
+    async def reject(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[discord.ui.View],
+    ) -> None:
+        await self._decide(interaction, "rejected")
+
+
+def format_worker_exchange_notification(exchange: ReviewExchange) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"交換のみ取引の審査 #{exchange.exchange_id}",
+        description=(
+            "状態: 未審査\n"
+            f"交換内容: {_escape_for_discord(exchange.exchange_description)[:1000]}\n"
+            f"受付日時: {_escape_for_discord(exchange.submitted_at)[:50]}"
+        ),
+        color=discord.Color.blurple(),
+    )
+    for item_index, item in enumerate(exchange.items, start=1):
+        character = item.character_name or item.character_id
+        if item.character_number:
+            character = f"{item.character_number} / {character}"
+        embed.add_field(
+            name=f"対象キャラクター {item_index}",
+            value="\n".join(
+                [
+                    f"**{_escape_for_discord(character)[:100]}**",
+                    f"レアリティ: {_escape_for_discord(item.rarity)[:40]}",
+                    f"レベル: {item.level}",
+                    f"変異: {_escape_for_discord(item.mutation)[:40]}",
+                    f"個数: {item.quantity}",
+                ]
+            ),
+            inline=False,
+        )
+    return embed
+
+
+class WorkerExchangeReviewView(discord.ui.View):
+    """Persistent approval controls for a pending exchange submission."""
+
+    def __init__(self, exchange_id: int) -> None:
+        super().__init__(timeout=None)
+        self.exchange_id = exchange_id
+
+    async def _decide(
+        self,
+        interaction: discord.Interaction,
+        status: str,
+    ) -> None:
+        if not _can_review_worker_trades(interaction):
+            await interaction.response.send_message(
+                "この操作を実行する権限がありません。",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        admin_key = os.environ.get(WORKER_ADMIN_KEY_ENV_VAR, "").strip()
+        try:
+            await asyncio.to_thread(
+                update_exchange_status,
+                self.exchange_id,
+                status,
+                reviewer_id=str(interaction.user.id),
+                admin_key=admin_key,
+            )
+        except TradeReviewAPIError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            if "すでに審査" in str(error) and interaction.message is not None:
+                await interaction.message.edit(view=None)
+            return
+        except (discord.HTTPException, OSError):
+            logger.exception("交換のみ取引の審査操作に失敗しました。")
+            await interaction.followup.send(
+                "審査結果を保存できませんでした。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+            return
+
+        result_label = "承認" if status == "approved" else "拒否"
+        if interaction.message is not None:
+            await interaction.message.edit(
+                content=f"交換のみ取引 #{self.exchange_id} は{result_label}されました。",
+                view=None,
+            )
+        await interaction.followup.send(
+            f"交換のみ取引 #{self.exchange_id} を{result_label}しました。",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="承認",
+        style=discord.ButtonStyle.success,
+        custom_id="worker_exchange_review:approve",
+    )
+    async def approve(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[discord.ui.View],
+    ) -> None:
+        await self._decide(interaction, "approved")
+
+    @discord.ui.button(
+        label="拒否",
+        style=discord.ButtonStyle.danger,
+        custom_id="worker_exchange_review:reject",
+    )
+    async def reject(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button[discord.ui.View],
+    ) -> None:
+        await self._decide(interaction, "rejected")
+
+
+async def publish_pending_worker_trade_notifications(
+    client: discord.Client,
+    db_path: str | Path = DATABASE_PATH,
+) -> int:
+    """Send new Worker submissions to the configured review channel once."""
+    channel_id = get_worker_trade_review_channel(db_path)
+    admin_key = os.environ.get(WORKER_ADMIN_KEY_ENV_VAR, "").strip()
+    if channel_id is None:
+        logger.warning(
+            "Web取引の審査先が未設定です。/set_trade_review_channel を実行してください。"
+        )
+        return 0
+    if not admin_key:
+        logger.error("%s がBot環境に設定されていません。", WORKER_ADMIN_KEY_ENV_VAR)
+        return 0
+
+    try:
+        pending = await asyncio.to_thread(get_pending_trades, admin_key=admin_key)
+        notified = {trade_id for trade_id, _ in get_worker_trade_notification_ids(db_path)}
+        channel = client.get_channel(int(channel_id))
+        if channel is None:
+            channel = await client.fetch_channel(int(channel_id))
+        send = getattr(channel, "send", None)
+        if send is None:
+            logger.error("設定された審査先はメッセージを送信できるチャンネルではありません。")
+            return 0
+        sent = 0
+        for trade in pending:
+            if trade.trade_id in notified:
+                continue
+            message = await send(
+                embed=format_worker_trade_notification(trade),
+                view=WorkerTradeReviewView(trade.trade_id),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            record_worker_trade_notification(
+                trade.trade_id,
+                channel_id,
+                str(message.id),
+                db_path,
+            )
+            sent += 1
+        return sent
+    except (TradeReviewAPIError, discord.HTTPException, sqlite3.Error, ValueError):
+        logger.exception("Web取引の審査通知を送信できませんでした。")
+        return 0
+
+
+async def publish_pending_worker_exchange_notifications(
+    client: discord.Client,
+    db_path: str | Path = DATABASE_PATH,
+) -> int:
+    channel_id = get_worker_trade_review_channel(db_path)
+    admin_key = os.environ.get(WORKER_ADMIN_KEY_ENV_VAR, "").strip()
+    if channel_id is None or not admin_key:
+        return 0
+
+    try:
+        pending = await asyncio.to_thread(get_pending_exchanges, admin_key=admin_key)
+        notified = {
+            exchange_id
+            for exchange_id, _ in get_worker_exchange_notification_ids(db_path)
+        }
+        channel = client.get_channel(int(channel_id))
+        if channel is None:
+            channel = await client.fetch_channel(int(channel_id))
+        send = getattr(channel, "send", None)
+        if send is None:
+            logger.error("設定された審査先はメッセージを送信できるチャンネルではありません。")
+            return 0
+        sent = 0
+        for exchange in pending:
+            if exchange.exchange_id in notified:
+                continue
+            message = await send(
+                embed=format_worker_exchange_notification(exchange),
+                view=WorkerExchangeReviewView(exchange.exchange_id),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            record_worker_exchange_notification(
+                exchange.exchange_id,
+                channel_id,
+                str(message.id),
+                db_path,
+            )
+            sent += 1
+        return sent
+    except (TradeReviewAPIError, discord.HTTPException, sqlite3.Error, ValueError):
+        logger.exception("交換のみ取引の審査通知を送信できませんでした。")
+        return 0
+
+
+async def _poll_worker_trade_reviews(client: discord.Client) -> None:
+    while not client.is_closed():
+        await publish_pending_worker_trade_notifications(client)
+        await publish_pending_worker_exchange_notifications(client)
+        await asyncio.sleep(120)
 
 
 class SingleTradeModal(discord.ui.Modal, title="単体・まとめ買い"):
@@ -1339,9 +1790,20 @@ class PythonAppBot(discord.Client):
         super().__init__(intents=discord.Intents.default())
         self.tree = app_commands.CommandTree(self)
         self.add_view(TradeEntryView())
+        self.worker_trade_poll_task: asyncio.Task[None] | None = None
 
     async def setup_hook(self) -> None:
         """Sync global slash commands and mirror them to every connected guild."""
+        for trade_id, message_id in get_worker_trade_notification_ids():
+            self.add_view(
+                WorkerTradeReviewView(trade_id),
+                message_id=int(message_id),
+            )
+        for exchange_id, message_id in get_worker_exchange_notification_ids():
+            self.add_view(
+                WorkerExchangeReviewView(exchange_id),
+                message_id=int(message_id),
+            )
         synced_commands = await self.tree.sync()
         command_names = ", ".join(command.name for command in synced_commands)
         logger.info(
@@ -1349,6 +1811,15 @@ class PythonAppBot(discord.Client):
             len(synced_commands),
             command_names,
         )
+
+    async def close(self) -> None:
+        if self.worker_trade_poll_task is not None:
+            self.worker_trade_poll_task.cancel()
+            try:
+                await self.worker_trade_poll_task
+            except asyncio.CancelledError:
+                pass
+        await super().close()
 
 
 
@@ -1383,6 +1854,13 @@ def create_bot() -> PythonAppBot:
             bot.user.name,
             bot.user.id,
         )
+        if (
+            bot.worker_trade_poll_task is None
+            or bot.worker_trade_poll_task.done()
+        ):
+            bot.worker_trade_poll_task = asyncio.create_task(
+                _poll_worker_trade_reviews(bot)
+            )
 
         # Guild-scoped commands propagate immediately, avoiding the delay of
         # Discord's global command propagation for newly added commands.
@@ -1416,98 +1894,157 @@ def create_bot() -> PythonAppBot:
         )
 
     @bot.tree.command(
-        name="market",
-        description="登録済みの取引データからキャラの相場一覧を表示します。",
+        name="set_trade_review_channel",
+        description="Web取引の審査通知チャンネルを設定します。",
     )
-    @app_commands.describe(character="キャラの正式名称")
+    async def set_trade_review_channel(
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+    ) -> None:
+        if not _is_guild_administrator(interaction):
+            await interaction.response.send_message(
+                "この設定はサーバー管理者のみ実行できます。",
+                ephemeral=True,
+            )
+            return
+        try:
+            configure_worker_trade_review_channel(str(channel.id))
+        except sqlite3.Error:
+            logger.exception("Web取引の審査チャンネルを保存できませんでした。")
+            await interaction.response.send_message(
+                "審査チャンネルを保存できませんでした。時間をおいて再度お試しください。",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            f"Web取引の審査通知先を {channel.mention} に設定しました。",
+            ephemeral=True,
+        )
+
+    @bot.tree.command(
+        name="market",
+        description="最新の市場スナップショットを表示します。",
+    )
+    @app_commands.describe(character="3桁のキャラクター番号（例: 001）または正式名称")
     async def market(
         interaction: discord.Interaction,
         character: str,
     ) -> None:
-        """Show level-1/max prices and mutation multipliers."""
-        try:
-            initialize_database()
-            with sqlite3.connect(DATABASE_PATH) as connection:
-                resolution = resolve_character_name(connection, character)
-                if not resolution.is_verified:
-                    await interaction.response.send_message(
-                        "このキャラ名はまだ未確認です。管理者の確認後に相場計算の対象になります。",
-                        ephemeral=True,
-                    )
-                    return
-                grouped = load_character_market_observations(
-                    connection, resolution.character_name
+        """Show the latest market snapshot from the Cloudflare Worker."""
+        await interaction.response.defer(ephemeral=True)
+        is_character_number = character.isascii() and character.isdigit()
+        if is_character_number and len(character) != 3:
+            await interaction.followup.send(
+                "キャラクター番号は3桁の数字で入力してください（例: 001）。",
+                ephemeral=True,
+            )
+            return
+
+        resolved_character_name: str | None = None
+        if not is_character_number:
+            try:
+                initialize_database()
+                with sqlite3.connect(DATABASE_PATH) as connection:
+                    resolution = resolve_character_name(connection, character)
+                    if not resolution.is_verified:
+                        await interaction.followup.send(
+                            "このキャラ名はまだ未確認です。管理者の確認後に相場計算の対象になります。",
+                            ephemeral=True,
+                        )
+                        return
+                    resolved_character_name = resolution.character_name
+            except sqlite3.Error:
+                logger.exception("キャラ名の確認に失敗しました。")
+                await interaction.followup.send(
+                    "キャラ名を確認できませんでした。時間をおいて再度お試しください。",
+                    ephemeral=True,
                 )
-        except sqlite3.Error:
-            logger.exception("相場データの読み込みに失敗しました。")
-            await interaction.response.send_message(
-                "相場データを読み込めませんでした。時間をおいて再度お試しください。",
+                return
+
+        try:
+            snapshot = await asyncio.to_thread(
+                get_market_snapshot,
+                resolved_character_name,
+                character_number=character if is_character_number else None,
+            )
+        except MarketAPIError as error:
+            logger.warning(
+                "Workerから市場スナップショットを取得できませんでした: %s",
+                error,
+            )
+            await interaction.followup.send(
+                f"市場データを取得できませんでした。\n{error}",
                 ephemeral=True,
             )
             return
 
-        if not grouped:
-            await interaction.response.send_message(
-                f"「{_escape_for_discord(resolution.character_name)}」の確認済み取引データがありません。",
-                ephemeral=True,
-            )
-            return
-
-        all_observations = [
-            observation for values in grouped.values() for observation in values
-        ]
-        max_level = max(observation.level for observation in all_observations)
-        normal = grouped.get("通常", [])
-
-        def price_text(observations: list, level: int) -> str:
-            if not observations:
-                return "データ不足"
-            estimate = estimate_market_price(observations, level=level, mutation="通常")
-            return (
-                f"{estimate.price:,.0f}"
-                if estimate.confidence != "データ不足"
-                else "データ不足"
-            )
+        def price_text(value: float | None) -> str:
+            return "データ不足" if value is None else f"{value:,.0f}"
 
         lines = [
-            f"**{_escape_for_discord(resolution.character_name)} の相場**",
-            f"基準価格（通常）",
-            f"Lv.1　**{price_text(normal, 1)}**",
-            f"Lv.{max_level}　**{price_text(normal, max_level)}**"
-            f"　（登録データ上の最高Lv）",
+            (
+                f"**{snapshot.character_number} / "
+                f"{_escape_for_discord(snapshot.character_name)} の市場スナップショット**"
+                if snapshot.character_number
+                else f"**{_escape_for_discord(snapshot.character_name)} の市場スナップショット**"
+            ),
+            f"Lv.1価格: **{price_text(snapshot.level1_value)}** "
+            f"{snapshot.level1_direction}",
+            (
+                f"Lv.1サンプル数: {snapshot.level1_sample_count}件"
+                if snapshot.level1_sample_count is not None
+                else "Lv.1サンプル数: 過去データでは未記録"
+            ),
+            f"Lv.MAX価格: **{price_text(snapshot.level_max_value)}** "
+            f"{snapshot.level_max_direction}",
+            (
+                f"Lv.MAXサンプル数: {snapshot.level_max_sample_count}件"
+                if snapshot.level_max_sample_count is not None
+                else "Lv.MAXサンプル数: 過去データでは未記録"
+            ),
+            (
+                f"需要度: **{snapshot.demand_score:.1f}/5.0** "
+                f"{snapshot.demand_direction}"
+                if snapshot.demand_score is not None
+                else f"需要度: **データ不足** {snapshot.demand_direction}"
+            ),
             "",
-            "**変異倍率（通常 = 1.00x）**",
+            "**変異倍率**",
         ]
 
-        mutation_names = ["通常", "ユグ", "アクア", "ギャラ", "ラバ", "ハロウィン", "ダイヤ", "ゴールド", "ノーマル"]
-        for mutation in mutation_names:
-            observations = grouped.get(mutation)
-            if not observations:
-                continue
-            if mutation == "通常":
-                lines.append("通常　**1.00x**")
-                continue
-            normal_lv1 = estimate_market_price(normal, level=1, mutation="通常") if normal else None
-            mutation_lv1 = estimate_market_price(observations, level=1, mutation=mutation)
-            if (
-                normal_lv1
-                and normal_lv1.confidence != "データ不足"
-                and mutation_lv1.confidence != "データ不足"
-                and normal_lv1.price > 0
-            ):
-                multiplier = calculate_mutation_multiplier(normal_lv1.price, mutation_lv1.price)
-                lines.append(f"{_escape_for_discord(mutation)}　**{multiplier:.2f}x**")
-            else:
-                lines.append(f"{_escape_for_discord(mutation)}　—（Lv.1データ不足）")
+        mutation_labels = {
+            "normal": "ノーマル",
+            "ノーマル": "ノーマル",
+            "silver": "シルバー",
+            "gold": "ゴールド",
+            "diamond": "ダイヤ",
+            "lava": "ラバ",
+            "galaxy": "ギャラ",
+            "aqua": "アクア",
+            "yggdrasil": "ユグ",
+            "halo": "ハロ",
+        }
+        for mutation in snapshot.mutations:
+            label = mutation_labels.get(mutation.mutation, mutation.mutation)
+            multiplier_text = (
+                "データ不足"
+                if mutation.multiplier is None
+                else f"{mutation.multiplier:.2f}x"
+            )
+            lines.append(
+                f"{_escape_for_discord(label)}: **{multiplier_text}** "
+                f"{mutation.direction}"
+            )
 
-        lines.extend([
-            "",
-            f"使用データ: {len(all_observations)}件",
-            "※セット取引・未確認名・計算できない金額は対象外です。",
-            "※最高Lvは登録されている取引データの最高レベルです。",
-            "※変異倍率はLv.1の変異価格 ÷ 通常価格です。",
-        ])
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        lines.extend(
+            [
+                "",
+                f"需要対象取引: {snapshot.sample_count}件",
+                f"更新日時: {snapshot.created_at}",
+                "※ ↑上昇 / ↓下落 / →変化なし（または比較データなし）",
+            ]
+        )
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     @bot.tree.command(
         name="trades",
