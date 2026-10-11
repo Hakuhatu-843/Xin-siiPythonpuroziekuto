@@ -13,6 +13,7 @@ The GitHub Pages form submits trade records to Cloudflare Workers. New submissio
 - `POST /trades/{id}/status` and `POST /exchanges/{id}/status` — admin review
 - `GET /admin/statistics` — admin-only aggregate statistics
 - `GET /market-value` — median price estimate when enough approved single-trade samples exist
+- `GET /market-snapshot?characterNumber=005` or `?characterName=...` — latest persisted snapshot, price sample counts, demand score, mutation multipliers, and comparison directions for the Discord market command
 - `GET/POST /admin/blocked-ips` — admin-only abuse controls
 
 Admin endpoints require the Worker secret `ADMIN_KEY` via the `X-Admin-Key` header. Set it as a Worker secret; never commit the key to GitHub or the HTML pages.
