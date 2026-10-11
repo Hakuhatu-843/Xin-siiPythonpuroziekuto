@@ -2129,16 +2129,16 @@ def create_bot() -> PythonAppBot:
             }
             colored_lines = [
                 (
-                    f"\\x1b[{rarity_ansi_colors.get(item.rarity, '37')}m"
+                    f"chr(27)[{rarity_ansi_colors.get(item.rarity, '37')}m"
                     f"{item.character_number} — "
                     f"{discord.utils.escape_markdown(item.english_name)}"
-                    f"\\x1b[0m"
+                    f"chr(27)[0m"
                 )
                 for item in entries
             ]
             embed = discord.Embed(
                 title=f"Character Number List ({self.page + 1}/{page_count})",
-                description="```ansi\\n" + "\\n".join(colored_lines) + "\\n```",
+                description="```ansi\n" + "\n".join(colored_lines) + "\n```",
                 color=discord.Color.blurple(),
             )
             embed.set_footer(text=f"{len(self.characters)} tradable characters · Worker catalog")
