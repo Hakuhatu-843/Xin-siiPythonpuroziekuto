@@ -411,7 +411,7 @@ async function getMarketSnapshot(request, env) {
   if (Boolean(characterNumber) === Boolean(characterName)) {
     return json({ ok: false, error: "Provide characterNumber or characterName" }, 400, request);
   }
-  if (characterNumber && !/^\\d{3}$/.test(characterNumber)) {
+  if (characterNumber && !/^\d{3}$/.test(characterNumber)) {
     return json({ ok: false, error: "Invalid character number" }, 400, request);
   }
 
