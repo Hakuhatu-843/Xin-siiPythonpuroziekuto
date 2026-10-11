@@ -1,6 +1,6 @@
 # Trade Value API (Cloudflare Workers + D1)
 
-The GitHub Pages form submits trade records to Cloudflare Workers. New submissions stay pending until a reviewer approves or rejects them. Priced submissions record whether the submitter acquired or gave away each character. Exchange-only submissions treat selected characters as acquired, while the description records what was given away. Exchange-only submissions have no price and are excluded from price calculations.
+The GitHub Pages form first asks for sell, buy, or trade. Sell/buy submissions then ask for single, bundle, or set. Priced submissions stay pending until a reviewer approves or rejects them and store whether the submitter gave away or acquired each character. Trade submissions treat selected characters as acquired, while the exchange description records what was given away. Trade submissions have no price and are excluded from price calculations. Existing rows keep an unknown direction instead of being guessed.
 
 ## API
 
