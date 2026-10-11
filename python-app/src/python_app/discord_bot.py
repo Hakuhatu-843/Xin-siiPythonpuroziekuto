@@ -1934,6 +1934,19 @@ def create_bot() -> PythonAppBot:
             "",
             "**変異倍率**",
         ]
+        if snapshot.acquired_count is None or snapshot.exchange_acquired_count is None or snapshot.given_count is None:
+            lines.append("需要内訳: 過去データでは未記録")
+        else:
+            lines.extend([
+                f"入手件数: {snapshot.acquired_count}件",
+                f"交換での入手件数: {snapshot.exchange_acquired_count}件",
+                f"手放した件数: {snapshot.given_count}件",
+                (
+                    f"入手需要の前回更新との差: {snapshot.demand_delta:+d}件"
+                    if snapshot.demand_delta is not None
+                    else "入手需要の前回更新との差: 未記録"
+                ),
+            ])
         mutation_labels = {
             "normal": "ノーマル", "ノーマル": "ノーマル",
             "silver": "シルバー", "シルバー": "シルバー",
