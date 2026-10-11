@@ -1793,7 +1793,7 @@ class PythonAppBot(discord.Client):
         self.worker_trade_poll_task: asyncio.Task[None] | None = None
 
     async def setup_hook(self) -> None:
-        """Sync global slash commands and mirror them to every connected guild."""
+        """Sync global slash commands; remove stale guild-scoped duplicates on ready."""
         for trade_id, message_id in get_worker_trade_notification_ids():
             self.add_view(
                 WorkerTradeReviewView(trade_id),
@@ -1862,20 +1862,19 @@ def create_bot() -> PythonAppBot:
                 _poll_worker_trade_reviews(bot)
             )
 
-        # Guild-scoped commands propagate immediately, avoiding the delay of
-        # Discord's global command propagation for newly added commands.
+        # Remove old guild-scoped copies so each slash command appears only
+        # once. The canonical commands are synced globally in setup_hook.
         for guild in bot.guilds:
             try:
-                bot.tree.copy_global_to(guild=guild)
-                guild_commands = await bot.tree.sync(guild=guild)
+                bot.tree.clear_commands(guild=guild)
+                await bot.tree.sync(guild=guild)
                 logger.info(
-                    "ギルドコマンドを同期しました: %s (%d件)",
+                    "重複したギルドコマンドを整理しました: %s",
                     guild.name,
-                    len(guild_commands),
                 )
             except discord.HTTPException:
                 logger.exception(
-                    "ギルドコマンドの同期に失敗しました: %s", guild.id
+                    "ギルドコマンドの整理に失敗しました: %s", guild.id
                 )
 
     @bot.tree.command(name="ping", description="Check whether the bot is online.")
@@ -2105,70 +2104,6 @@ def create_bot() -> PythonAppBot:
             super().__init__(timeout=180)
             self.add_item(MarketRaritySelect(owner_id, characters))
 
-    class CharacterNumberListView(discord.ui.View):
-        def __init__(self, characters: list[CharacterCatalogEntry]) -> None:
-            super().__init__(timeout=600)
-            self.characters = characters
-            self.page = 0
-            self.page_size = 25
-            self.refresh_items()
-
-        def make_content(self) -> str:
-            start_index = self.page * self.page_size
-            entries = self.characters[start_index:start_index + self.page_size]
-            page_count = max(1, (len(self.characters) + self.page_size - 1) // self.page_size)
-            rarity_ansi_colors = {
-                "common": "37",     # gray
-                "rare": "34",       # blue
-                "epic": "35",       # magenta
-                "legend": "33",     # yellow
-                "mythic": "91",     # bright red
-                "secret": "36",     # cyan
-                "ultimate": "93",   # bright yellow
-                "emperor": "31",    # dark red
-            }
-            colored_lines = [
-                (
-                    f"{chr(27)}[{rarity_ansi_colors.get(item.rarity, '37')}m"
-                    f"{item.character_number} — "
-                    f"{discord.utils.escape_markdown(item.english_name)}"
-                    f"{chr(27)}[0m"
-                )
-                for item in entries
-            ]
-            return (
-                f"**Character Number List ({self.page + 1}/{page_count})**\n"
-                + "```ansi\n"
-                + "\n".join(colored_lines)
-                + "\n```\n"
-                + f"*{len(self.characters)} tradable characters · Worker catalog*"
-            )
-
-        def refresh_items(self) -> None:
-            self.clear_items()
-            previous = discord.ui.Button(
-                label="前へ", style=discord.ButtonStyle.secondary,
-                disabled=self.page == 0,
-            )
-            next_button = discord.ui.Button(
-                label="次へ", style=discord.ButtonStyle.secondary,
-                disabled=(self.page + 1) * self.page_size >= len(self.characters),
-            )
-            previous.callback = self.go_previous
-            next_button.callback = self.go_next
-            self.add_item(previous)
-            self.add_item(next_button)
-
-        async def go_previous(self, interaction: discord.Interaction) -> None:
-            self.page = max(0, self.page - 1)
-            self.refresh_items()
-            await interaction.response.edit_message(content=self.make_content(), embed=None, view=self)
-
-        async def go_next(self, interaction: discord.Interaction) -> None:
-            self.page = min((len(self.characters) - 1) // self.page_size, self.page + 1)
-            self.refresh_items()
-            await interaction.response.edit_message(content=self.make_content(), embed=None, view=self)
-
     @bot.tree.command(
         name="market",
         description="レアリティとキャラを選んで相場情報を表示します。",
@@ -2189,27 +2124,6 @@ def create_bot() -> PythonAppBot:
             "まずレアリティを選択してください。",
             view=MarketRarityView(interaction.user.id, characters),
             ephemeral=True,
-        )
-
-    @bot.tree.command(
-        name="character_number",
-        description="キャラクターの英語名と番号一覧を表示します。",
-    )
-    async def character_number(interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=False)
-        try:
-            characters = await asyncio.to_thread(get_characters)
-        except MarketAPIError as error:
-            await interaction.followup.send(
-                f"キャラ一覧を取得できませんでした。\n{error}", ephemeral=True
-            )
-            return
-        if not characters:
-            await interaction.followup.send("Workerのキャラ一覧が空です。", ephemeral=True)
-            return
-        view = CharacterNumberListView(characters)
-        await interaction.followup.send(
-            content=view.make_content(), view=view, ephemeral=False
         )
 
     @bot.tree.command(
