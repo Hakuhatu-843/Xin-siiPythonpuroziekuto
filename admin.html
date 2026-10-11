@@ -1,124 +1,395 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Trade Value 管理画面</title>
-<style>
-:root{color-scheme:dark;--bg:#10131b;--panel:#191e2a;--line:#30384c;--text:#edf0f7;--muted:#98a2b8;--acc:#f2b84b}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,"Noto Sans JP",sans-serif}
-.wrap{max-width:1100px;margin:auto;padding:24px 16px 50px}header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-h1{font-size:22px;margin:0;color:var(--acc)}button,select{border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:9px;padding:9px 12px}
-button{cursor:pointer}button:hover{border-color:var(--acc)}.tools{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}
-#info{color:var(--muted);margin-bottom:12px}.error{color:#ff8585}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}
-.top{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.id{font-weight:700}.price{font-size:17px;font-weight:700}.pending{color:#f2b84b}.approved{color:#70d695}.rejected{color:#ff8585}
-.meta{color:var(--muted);font-size:12px}.items{padding:10px 14px}.item{padding:8px 0;border-bottom:1px solid #272e40}.item:last-child{border-bottom:0}.ip{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#c9d2e8}.smallbtn{padding:5px 8px;font-size:12px}
-.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 7px;margin-right:5px;font-size:12px}.verified{color:#70d695}.unverified{color:#ffb36b}
-.empty{padding:30px;text-align:center;color:var(--muted)}
-.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.actions button{padding:7px 10px}.approve{border-color:#387a55}.reject{border-color:#8a4444}.back{border-color:#59627a}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://trade-value-api.hakuhatu-okuchi.workers.dev; form-action 'none'; base-uri 'none'">
+  <title>取引審査 | Trade Value</title>
+  <style>
+    :root{color-scheme:dark;--bg:#12151f;--panel:#1a1f2d;--panel2:#222839;--line:#343d55;--text:#e9ecf4;--muted:#a5aec3;--accent:#f2b84b;--danger:#ff8989;--success:#75deb2;--focus:#ffe19a;font:16px/1.55 system-ui,-apple-system,"Noto Sans JP",sans-serif}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text)}
+    button,input,select{font:inherit}
+    button,select,input{min-height:44px}
+    button{border:1px solid var(--line);border-radius:9px;padding:8px 14px;background:var(--panel2);color:var(--text);font-weight:700;cursor:pointer}
+    button:disabled{opacity:.55;cursor:wait}
+    :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+    .wrap{width:min(100% - 24px,1000px);margin:0 auto;padding:18px 0 max(28px,env(safe-area-inset-bottom))}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    h1{font-size:1.4rem;margin:0;color:var(--accent)}
+    h2{font-size:1.15rem;margin:.25rem 0}
+    p{margin:.5rem 0}
+    .muted,.hint{color:var(--muted);font-size:.92rem}
+    .panel,.record{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
+    .auth{max-width:560px;margin:24px auto}
+    label{display:block;font-weight:700;margin:12px 0 5px}
+    input,select{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:var(--bg);color:var(--text)}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .row>*{flex:1}
+    .toolbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:end}
+    .toolbar label{margin:0}
+    .toolbar button{grid-column:span 2}
+    .error{color:var(--danger);font-weight:700;min-height:1.5em}
+    .notice{border-left:4px solid var(--accent);padding:8px 11px;background:var(--panel2);border-radius:4px;color:var(--muted)}
+    .records{display:grid;gap:12px;margin-top:14px}
+    .record{margin:0;padding:14px}
+    .record-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+    .record-title{font-weight:800;font-size:1.05rem;overflow-wrap:anywhere}
+    .badge{border-radius:999px;padding:3px 10px;font-weight:800;font-size:.85rem;background:var(--panel2)}
+    .badge.pending{color:var(--accent)}
+    .badge.approved{color:var(--success)}
+    .badge.rejected{color:var(--danger)}
+    .facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}
+    .fact{background:var(--panel2);border-radius:8px;padding:8px;min-width:0}
+    .fact small{display:block;color:var(--muted)}
+    .fact span{overflow-wrap:anywhere}
+    details{border-top:1px solid var(--line);padding-top:9px;margin-top:10px}
+    summary{cursor:pointer;font-weight:700;min-height:36px}
+    .items{display:grid;gap:8px;margin-top:8px}
+    .item{padding:10px;background:var(--bg);border:1px solid var(--line);border-radius:9px}
+    .item p{margin:2px 0}
+    .actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
+    .actions button{flex:1;min-width:120px}
+    .approve{border-color:#39876a;color:var(--success)}
+    .reject{border-color:#9a4d54;color:var(--danger)}
+    .empty{text-align:center;color:var(--muted);padding:24px 8px}
+    .footer-actions{display:flex;justify-content:center;margin-top:14px}
+    .back{color:var(--accent);text-decoration:none}
+    @media(min-width:650px){.toolbar{grid-template-columns:1fr 1fr auto}.toolbar button{grid-column:auto}.facts{grid-template-columns:repeat(4,minmax(0,1fr))}}
+    @media(max-width:420px){.wrap{width:min(100% - 16px,1000px);padding-top:10px}.panel{padding:12px}.record{padding:11px}.facts{grid-template-columns:1fr 1fr}.toolbar{gap:7px}}
+  </style>
 </head>
 <body>
-<div class="wrap">
-<header><h1>Trade Value 管理画面</h1><div><button id="changeKey">🔑 管理キー変更</button> <button id="refresh">↻ 更新</button></div></header>
-<div class="tools">
-<select id="status"><option value="">すべて</option><option value="pending">未確認</option><option value="approved">承認済み</option><option value="rejected">却下</option></select>
-<select id="limit"><option value="20">20件</option><option value="50" selected>50件</option><option value="100">100件</option></select>
-</div>
-<div id="info">読み込み中...</div>
-<div id="blockedSection" class="card" style="padding:14px"><div style="font-weight:700;margin-bottom:8px">🚫 ブロック中のIP</div><div id="blockedList" class="meta">読み込み中...</div></div>
-<div id="list"></div>
-</div>
-<script>
-const API='https://trade-value-api.hakuhatu-okuchi.workers.dev';
-const TYPE={single:'単体',bundle:'まとめ買い',set:'セット'};
-const STATUS={pending:'未確認',approved:'承認済み',rejected:'却下'};
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const yen=n=>Number(n).toLocaleString('ja-JP');
-let blockedIps = new Set();
+  <main class="wrap">
+    <header>
+      <div>
+        <h1>Trade Value — 投稿審査</h1>
+        <p class="muted">通常取引と交換のみの申請を確認します。</p>
+      </div>
+      <a class="back" href="./">投稿フォームへ戻る</a>
+    </header>
 
-function renderBlocked(){
- const el=document.querySelector('#blockedList');
- if(!blockedIps.size){el.textContent='現在ブロック中のIPはありません';return}
- el.innerHTML=Array.from(blockedIps).map(ip=>'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:5px 0"><span class="ip">'+esc(ip)+'</span><button class="smallbtn back" data-unblock-ip="'+esc(ip)+'">解除</button></div>').join('');
-}
+    <section id="auth-panel" class="panel auth">
+      <h2>審査担当者の認証</h2>
+      <p class="notice">審査専用キーを入力してください。キーはHTTPSで審査APIへ送信し、このページのメモリ内だけで使います。保存はしません。Workerの管理キーとは別のキーです。信頼できる端末・担当者だけに共有してください。</p>
+      <form id="auth-form">
+        <label for="reviewer">審査記録に表示する担当者名</label>
+        <input id="reviewer" name="reviewer" maxlength="100" autocomplete="off" required>
+        <label for="review-key">審査専用キー</label>
+        <input id="review-key" name="review-key" type="password" autocomplete="off" spellcheck="false" required>
+        <p class="hint">担当者名は入力された監査ラベルであり、個人の本人確認には使われません。本人確認は共有管理キーで行われます。</p>
+        <button type="submit">認証して審査一覧を開く</button>
+        <p id="auth-error" class="error" role="alert"></p>
+      </form>
+    </section>
 
-async function loadBlocked(){
- const key=getAdminKey(); if(!key)return;
- try{
-  const r=await fetch(API+'/admin/blocked-ips',{headers:{'X-Admin-Key':key}});
-  const d=await r.json();
-  if(!r.ok||!d.ok)throw new Error(d.error||'ブロック一覧の読み込みに失敗しました');
-  blockedIps=new Set((d.blockedIps||[]).map(x=>x.ip));
-  renderBlocked();
- }catch(e){document.querySelector('#blockedList').innerHTML='<span class="error">'+esc(e.message)+'</span>'}
-}
+    <section id="review-panel" hidden>
+      <div class="panel">
+        <div class="toolbar">
+          <label>審査状態
+            <select id="status-filter">
+              <option value="pending">審査待ち</option>
+              <option value="approved">承認済み</option>
+              <option value="rejected">却下済み</option>
+            </select>
+          </label>
+          <label>投稿の種類
+            <select id="type-filter">
+              <option value="all">通常取引・交換</option>
+              <option value="trade">通常取引</option>
+              <option value="exchange">交換のみ</option>
+            </select>
+          </label>
+          <button id="refresh" type="button">再読み込み</button>
+        </div>
+        <p id="message" class="muted" role="status" aria-live="polite"></p>
+        <p id="error" class="error" role="alert"></p>
+        <div id="records" class="records"></div>
+        <div class="footer-actions"><button id="load-more" type="button" hidden>さらに読み込む</button></div>
+      </div>
+      <div class="footer-actions"><button id="logout" type="button">ログアウトしてキーを消去</button></div>
+    </section>
+  </main>
 
-async function updateBlockedIp(ip,action){
- const labels={block:'ブロック',unblock:'ブロック解除'};
- if(!confirm(ip+' を'+labels[action]+'しますか？'))return;
- try{
-  const key=getAdminKey(); if(!key)return;
-  const r=await fetch(API+'/admin/blocked-ips',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Key':key},body:JSON.stringify({ip,action})});
-  const d=await r.json();
-  if(!r.ok||!d.ok)throw new Error(d.error||'更新に失敗しました');
-  await Promise.all([load(),loadBlocked()]);
- }catch(e){alert(e.message)}
-}
+  <script>
+    'use strict';
+    const API = 'https://trade-value-api.hakuhatu-okuchi.workers.dev';
+    const PAGE_SIZE = 50;
+    let reviewKey = '';
+    let reviewer = '';
+    let loading = false;
+    let pages = null;
+    const $ = (selector) => document.querySelector(selector);
+    const authPanel = $('#auth-panel');
+    const reviewPanel = $('#review-panel');
+    const records = $('#records');
+    const message = $('#message');
+    const errorBox = $('#error');
+    const authError = $('#auth-error');
 
-function render(trades){
- const list=document.querySelector('#list');
- if(!trades.length){list.innerHTML='<div class="empty">取引データがありません</div>';return}
- list.innerHTML=trades.map(t=>{
-   const items=t.items.map(i=>`<div class="item"><span class="badge">#${i.position}</span><b>${esc(i.characterId)}</b> / ${esc(i.rarity)} / Lv.${i.level} / ${esc(i.mutation)} / ×${i.quantity}
-   <span class="${i.isVerified?'verified':'unverified'}">[${i.isVerified?'確認済み':'未確認'}]</span></div>`).join('');
-   return `<section class="card"><div class="top"><div><span class="id">取引 #${t.id}</span>　<span class="badge">${TYPE[t.tradeType]||esc(t.tradeType)}</span>　<span class="${t.status}">${STATUS[t.status]||esc(t.status)}</span><div class="meta">${new Date(t.submittedAt).toLocaleString('ja-JP')}　IP: <span class="ip">${esc(t.clientIp||'不明')}</span></div></div><div class="price">${yen(t.totalPrice)}</div></div><div class="items">${items}<div class="actions">${t.clientIp?'<button class="reject smallbtn" data-block-ip="'+esc(t.clientIp)+'">🚫 このIPをブロック</button>':''}${t.status!=='approved'?'<button class="approve" data-id="'+t.id+'" data-status="approved">✓ 承認</button>':''}${t.status!=='rejected'?'<button class="reject" data-id="'+t.id+'" data-status="rejected">✕ 却下</button>':''}${t.status!=='pending'?'<button class="back" data-id="'+t.id+'" data-status="pending">↩ 未確認に戻す</button>':''}</div></div></section>`;
- }).join('');
-}
-function getAdminKey(){
- let key=localStorage.getItem('tradeValueAdminKey');
- if(!key){
-  key=prompt('管理キーを入力してください');
-  if(key)localStorage.setItem('tradeValueAdminKey',key);
- }
- return key||'';
-}
-async function setStatus(id,status){
- const labels={approved:'承認',rejected:'却下',pending:'未確認に戻す'};
- if(!confirm('取引 #'+id+' を「'+labels[status]+'」にしますか？'))return;
- try{
-  const key=getAdminKey(); if(!key)return;
-  const r=await fetch(API+'/trades/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Key':key},body:JSON.stringify({status})});
-  const d=await r.json();
-  if(!r.ok||!d.ok)throw new Error(d.error||'更新に失敗しました');
-  await load();
- }catch(e){alert(e.message)}
-}
-async function load(){
- const key=getAdminKey(); if(!key){document.querySelector('#info').textContent='管理キーが必要です';return;}
- const status=document.querySelector('#status').value,limit=document.querySelector('#limit').value;
- const q=new URLSearchParams({limit});if(status)q.set('status',status);
- document.querySelector('#info').textContent='読み込み中...';
- try{
-  const r=await fetch(API+'/trades?'+q,{headers:{'X-Admin-Key':key}});const d=await r.json();
-  if(!r.ok||!d.ok)throw new Error(d.error||'読み込みに失敗しました');
-  render(d.trades);document.querySelector('#info').textContent=`${d.trades.length}件を表示中`;
- }catch(e){document.querySelector('#info').innerHTML='<span class="error">'+esc(e.message)+'</span>'}
-}
-document.querySelector('#list').addEventListener('click',e=>{
- const b=e.target.closest('button');
- if(!b)return;
- if(b.dataset.id&&b.dataset.status)setStatus(b.dataset.id,b.dataset.status);
- if(b.dataset.blockIp)updateBlockedIp(b.dataset.blockIp,'block');
-});
-document.querySelector('#blockedList').addEventListener('click',e=>{
- const b=e.target.closest('button[data-unblock-ip]');
- if(b)updateBlockedIp(b.dataset.unblockIp,'unblock');
-});
-document.querySelector('#changeKey').onclick=()=>{localStorage.removeItem('tradeValueAdminKey');load()};
-document.querySelector('#refresh').onclick=()=>{load();loadBlocked()};document.querySelector('#status').onchange=load;document.querySelector('#limit').onchange=load;load();loadBlocked();
-</script>
+    function el(tag, text, className) {
+      const node = document.createElement(tag);
+      if (text !== undefined && text !== null) node.textContent = String(text);
+      if (className) node.className = className;
+      return node;
+    }
+
+    function dateText(value) {
+      if (!value) return '—';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+    }
+
+    async function api(path, options = {}) {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch(`${API}${path}`, {
+          ...options,
+          signal: controller.signal,
+          headers: {
+            Accept: 'application/json',
+            'X-Review-Key': reviewKey,
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...options.headers
+          },
+          cache: 'no-store',
+          credentials: 'omit',
+          referrerPolicy: 'no-referrer'
+        });
+        let data;
+        try { data = await response.json(); }
+        catch { throw new Error('Worker APIから正しいJSON応答を取得できませんでした。'); }
+        if (response.status === 401) throw new Error('認証に失敗しました。キーを確認して再認証してください。');
+        if (response.status === 409) throw new Error('別の担当者が先に審査しました。一覧を再読み込みしてください。');
+        if (!response.ok || data?.ok !== true) {
+          throw new Error(data?.error || `Worker API error (${response.status})`);
+        }
+        return data;
+      } catch (cause) {
+        if (cause?.name === 'AbortError') throw new Error('Worker APIへの接続がタイムアウトしました。');
+        throw cause;
+      } finally {
+        window.clearTimeout(timer);
+      }
+    }
+
+    function newPages() {
+      return {
+        trade: { after: 0, through: null, hasMore: false },
+        exchange: { after: 0, through: null, hasMore: false }
+      };
+    }
+
+    function statusLabel(status) {
+      return ({ pending: '審査待ち', approved: '承認済み', rejected: '却下済み' })[status] || '不明';
+    }
+
+    function addFact(parent, label, value) {
+      const fact = el('div', undefined, 'fact');
+      fact.append(el('small', label), el('span', value ?? '—'));
+      parent.append(fact);
+    }
+
+    function renderItem(item, index) {
+      const section = el('section', undefined, 'item');
+      section.append(el('strong', `明細 ${index + 1}`));
+      const name = [item.characterNumber, item.characterName || item.characterId].filter(Boolean).join(' / ');
+      const line = el('p', name || 'キャラクター情報なし');
+      section.append(line);
+      const fields = [
+        ['レアリティ', item.rarity],
+        ['レベル', item.level == null ? null : `Lv.${item.level}`],
+        ['ミューテーション', item.mutation],
+        ['個数', item.quantity],
+        ['確認状態', item.isVerified == null ? null : (item.isVerified ? '確認済み' : '未確認')]
+      ];
+      for (const [label, value] of fields) {
+        if (value !== null && value !== undefined) section.append(el('p', `${label}: ${value}`));
+      }
+      return section;
+    }
+
+    function renderRecord(kind, record) {
+      const article = el('article', undefined, 'record');
+      const head = el('div', undefined, 'record-head');
+      head.append(el('span', `${kind === 'exchange' ? '交換' : '取引'} #${record.id}`, 'record-title'));
+      head.append(el('span', statusLabel(record.status), `badge ${record.status}`));
+      article.append(head);
+
+      const facts = el('div', undefined, 'facts');
+      addFact(facts, '投稿日時', dateText(record.submittedAt));
+      if (record.tradeType) addFact(facts, '取引タイプ', record.tradeType);
+      if (kind === 'trade') addFact(facts, '取引価格', record.totalPrice);
+      if (record.reviewedBy) addFact(facts, '審査担当者（入力ラベル）', record.reviewedBy);
+      if (record.reviewedAt) addFact(facts, '審査日時', dateText(record.reviewedAt));
+      article.append(facts);
+
+      const details = el('details');
+      details.append(el('summary', '投稿内容の詳細'));
+      const body = el('div', undefined, 'items');
+      if (kind === 'exchange') body.append(el('p', record.exchangeDescription || '交換内容なし'));
+      for (const [index, item] of (Array.isArray(record.items) ? record.items : []).entries()) {
+        body.append(renderItem(item, index));
+      }
+      details.append(body);
+      article.append(details);
+
+      if (record.status === 'pending') {
+        const actions = el('div', undefined, 'actions');
+        const approve = el('button', '承認', 'approve');
+        const reject = el('button', '却下', 'reject');
+        approve.type = reject.type = 'button';
+        approve.addEventListener('click', () => decide(kind, record, 'approved', actions));
+        reject.addEventListener('click', () => decide(kind, record, 'rejected', actions));
+        actions.append(approve, reject);
+        article.append(actions);
+      }
+      return article;
+    }
+
+    async function loadCategory(kind, status, reset) {
+      const page = pages[kind];
+      const path = kind === 'trade' ? '/trades' : '/exchanges';
+      const params = new URLSearchParams({ status, limit: String(PAGE_SIZE), after: String(page.after) });
+      if (page.through !== null) params.set('through', String(page.through));
+      const result = await api(`${path}?${params}`);
+      const entries = kind === 'trade' ? result.trades : result.exchanges;
+      if (!Array.isArray(entries) || entries.length > PAGE_SIZE ||
+          !Number.isSafeInteger(result.throughCursor) ||
+          typeof result.hasMore !== 'boolean' ||
+          (result.hasMore && !Number.isSafeInteger(result.nextCursor))) {
+        throw new Error('Worker APIのページ情報が不正です。処理を中断しました。');
+      }
+      if (page.through !== null && page.through !== result.throughCursor) {
+        throw new Error('審査一覧のカーソルが変わりました。再読み込みしてください。');
+      }
+      page.through = result.throughCursor;
+      page.hasMore = result.hasMore;
+      if (result.nextCursor !== null) page.after = result.nextCursor;
+      for (const record of entries) records.append(renderRecord(kind, record));
+      if (reset && entries.length === 0 && !page.hasMore) {
+        records.append(el('p', 'この状態の投稿はありません。', 'empty'));
+      }
+    }
+
+    function updateLoadMore() {
+      const type = $('#type-filter').value;
+      const available = type === 'all'
+        ? pages.trade.hasMore || pages.exchange.hasMore
+        : pages[type].hasMore;
+      $('#load-more').hidden = !available;
+      $('#load-more').disabled = loading;
+    }
+
+    async function refresh(reset = true, force = false) {
+      if (loading && !force) return;
+      loading = true;
+      $('#refresh').disabled = true;
+      $('#load-more').disabled = true;
+      errorBox.textContent = '';
+      message.textContent = reset ? '審査一覧を読み込み中です…' : '次のページを読み込み中です…';
+      if (reset) {
+        pages = newPages();
+        records.replaceChildren();
+      }
+      try {
+        const status = $('#status-filter').value;
+        const type = $('#type-filter').value;
+        const kinds = type === 'all' ? ['trade', 'exchange'] : [type];
+        await Promise.all(kinds.map((kind) => loadCategory(kind, status, reset)));
+        const totalShown = records.querySelectorAll('.record').length;
+        message.textContent = `${statusLabel(status)} — ${totalShown}件を表示中`;
+      } catch (cause) {
+        errorBox.textContent = cause instanceof Error ? cause.message : '一覧を取得できませんでした。';
+        message.textContent = 'データを取得できないため、表示内容は更新できていません。';
+      } finally {
+        loading = false;
+        $('#refresh').disabled = false;
+        updateLoadMore();
+      }
+    }
+
+    async function decide(kind, record, status, actions) {
+      if (loading || record.status !== 'pending') return;
+      const actionName = status === 'approved' ? '承認' : '却下';
+      if (!window.confirm(`投稿 #${record.id} を${actionName}しますか？`)) return;
+      loading = true;
+      for (const button of actions.querySelectorAll('button')) button.disabled = true;
+      errorBox.textContent = '';
+      message.textContent = `投稿 #${record.id} の審査結果を保存中です…`;
+      try {
+        const path = kind === 'trade' ? `/trades/${record.id}/status` : `/exchanges/${record.id}/status`;
+        const result = await api(path, {
+          method: 'POST',
+          body: JSON.stringify({ status, reviewerId: reviewer })
+        });
+        if (result.status !== status) throw new Error('審査結果を確認できませんでした。一覧を再読み込みしてください。');
+        message.textContent = `投稿 #${record.id} を${actionName}しました。`;
+        await refresh(true, true);
+      } catch (cause) {
+        errorBox.textContent = cause instanceof Error ? cause.message : '審査結果を保存できませんでした。';
+        message.textContent = '成功を確認できていません。表示上の状態は変更していません。';
+        if (cause instanceof Error && cause.message.includes('認証に失敗')) {
+          lock();
+          authError.textContent = cause.message;
+        } else if (cause instanceof Error && cause.message.includes('別の担当者')) {
+          await refresh(true, true);
+        }
+      } finally {
+        loading = false;
+        $('#refresh').disabled = false;
+        updateLoadMore();
+      }
+    }
+
+    function lock() {
+      reviewKey = '';
+      reviewer = '';
+      $('#review-key').value = '';
+      $('#reviewer').value = '';
+      reviewPanel.hidden = true;
+      authPanel.hidden = false;
+      pages = null;
+      records.replaceChildren();
+      message.textContent = '';
+      errorBox.textContent = '';
+    }
+
+    $('#auth-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const key = $('#review-key').value.trim();
+      const label = $('#reviewer').value.trim();
+      authError.textContent = '';
+      if (!key || !label || label.length > 100) {
+        authError.textContent = '担当者名と管理キーを入力してください。';
+        return;
+      }
+      reviewKey = key;
+      reviewer = label;
+      $('#auth-form button[type="submit"]').disabled = true;
+      try {
+        await api('/trades?status=pending&limit=1&after=0');
+        authPanel.hidden = true;
+        reviewPanel.hidden = false;
+        $('#status-filter').value = 'pending';
+        $('#type-filter').value = 'all';
+        await refresh(true);
+      } catch (cause) {
+        reviewKey = '';
+        authError.textContent = cause instanceof Error ? cause.message : '認証できませんでした。';
+      } finally {
+        $('#auth-form button[type="submit"]').disabled = false;
+      }
+    });
+
+    $('#refresh').addEventListener('click', () => refresh(true));
+    $('#load-more').addEventListener('click', () => refresh(false));
+    $('#status-filter').addEventListener('change', () => refresh(true));
+    $('#type-filter').addEventListener('change', () => refresh(true));
+    $('#logout').addEventListener('click', lock);
+    window.addEventListener('pagehide', () => { reviewKey = ''; reviewer = ''; });
+  </script>
 </body>
 </html>
