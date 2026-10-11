@@ -38,7 +38,7 @@ jobs:
           con = sqlite3.connect(":memory:")
           con.execute("PRAGMA foreign_keys = ON")
           migrations = sorted(Path("worker/migrations").glob("*.sql"))
-          assert len(migrations) == 5, f"Expected 5 migrations, got {len(migrations)}"
+          assert len(migrations) == 10, f"Expected 10 migrations, got {len(migrations)}"
           for migration in migrations:
               con.executescript(migration.read_text(encoding="utf-8"))
           tradeable = con.execute("SELECT COUNT(*) FROM characters WHERE is_tradable=1").fetchone()[0]
