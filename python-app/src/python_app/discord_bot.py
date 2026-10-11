@@ -2125,7 +2125,7 @@ def create_bot() -> PythonAppBot:
                 "mythic": "91",     # bright red
                 "secret": "36",     # cyan
                 "ultimate": "93",   # bright yellow
-                "emperor": "95",    # bright magenta
+                "emperor": "31",    # dark red
             }
             colored_lines = [
                 (
