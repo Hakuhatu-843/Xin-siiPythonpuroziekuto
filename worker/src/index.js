@@ -609,46 +609,50 @@ async function createMarketSnapshot(env) {
        WHERE t.status = 'approved' AND tc.character_id = ?`
     ).bind(characterId).first();
 
-    const totalCount = await env.DB.prepare(
-      `SELECT COUNT(*) AS count
-       FROM trade_characters tc
-       INNER JOIN trades t ON t.id = tc.trade_id
-       WHERE t.status = 'approved'`
+    const acquiredRow = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM trade_characters tc JOIN trades t ON t.id=tc.trade_id WHERE t.status='approved' AND tc.is_verified=1 AND tc.character_id=? AND tc.direction='acquired'"
+    ).bind(characterId).first();
+    const givenRow = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM trade_characters tc JOIN trades t ON t.id=tc.trade_id WHERE t.status='approved' AND tc.is_verified=1 AND tc.character_id=? AND tc.direction='given'"
+    ).bind(characterId).first();
+    const exchangeAcquiredRow = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM exchange_characters ec JOIN exchanges e ON e.id=ec.exchange_id WHERE e.status='approved' AND ec.is_verified=1 AND ec.character_id=? AND ec.direction='acquired'"
+    ).bind(characterId).first();
+    const totalDemandRow = await env.DB.prepare(
+      "SELECT (SELECT COUNT(*) FROM trade_characters tc JOIN trades t ON t.id=tc.trade_id WHERE t.status='approved' AND tc.is_verified=1 AND tc.direction='acquired') + (SELECT COUNT(*) FROM exchange_characters ec JOIN exchanges e ON e.id=ec.exchange_id WHERE e.status='approved' AND ec.is_verified=1 AND ec.direction='acquired') AS count"
+    ).first();
+    const characterCountRow = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM characters WHERE is_tradable=1"
     ).first();
 
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const recentCount = await env.DB.prepare(
-      `SELECT COUNT(*) AS count
-       FROM trade_characters tc
-       INNER JOIN trades t ON t.id = tc.trade_id
-       WHERE t.status = 'approved'
-         AND tc.character_id = ?
-         AND t.submitted_at >= ?`
-    ).bind(characterId, since).first();
-
+    const acquiredCount = Number(acquiredRow?.count || 0);
+    const givenCount = Number(givenRow?.count || 0);
+    const exchangeAcquiredCount = Number(exchangeAcquiredRow?.count || 0);
+    const demandCount = acquiredCount + exchangeAcquiredCount;
+    const averageDemand = Number(totalDemandRow?.count || 0) / Math.max(1, Number(characterCountRow?.count || 1));
+    const previous = await env.DB.prepare(
+      "SELECT acquired_count, exchange_acquired_count FROM market_snapshots WHERE character_id=? ORDER BY created_at DESC, id DESC LIMIT 1"
+    ).bind(characterId).first();
+    const previousDemand = previous && previous.acquired_count != null && previous.exchange_acquired_count != null
+      ? Number(previous.acquired_count) + Number(previous.exchange_acquired_count)
+      : demandCount;
+    const demandDelta = demandCount - previousDemand;
+    const relativeRatio = (demandCount + 1) / (averageDemand + 1);
+    const relativeScore = 3 + 1.2 * Math.log2(relativeRatio);
+    const trendAdjustment = Math.max(-0.5, Math.min(0.5, demandDelta / Math.max(1, averageDemand) * 0.25));
+    const demandScore = Math.round(Math.max(1, Math.min(5, relativeScore + trendAdjustment)) * 10) / 10;
     const count = Number(tradeCount?.count || 0);
-    const total = Number(totalCount?.count || 0);
-    const recent = Number(recentCount?.count || 0);
-    const shareScore = total > 0 ? (count / total) * 5 : 0;
-    const recentScore = Math.min(recent / 5, 5);
-    const demandScore = Math.round(
-      Math.max(0, Math.min(5, shareScore * 0.6 + recentScore * 0.4)) * 10
-    ) / 10;
 
     const snapshot = await env.DB.prepare(
       `INSERT INTO market_snapshots
        (character_id, level1_value, level_max_value, demand_score, sample_count,
-        level1_sample_count, level_max_sample_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        level1_sample_count, level_max_sample_count, acquired_count,
+        exchange_acquired_count, given_count, demand_delta, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
-      characterId,
-      lv1.value,
-      lvMax.value,
-      demandScore,
-      count,
-      lv1.sampleCount,
-      lvMax.sampleCount,
-      createdAt
+      characterId, lv1.value, lvMax.value, demandScore, count,
+      lv1.sampleCount, lvMax.sampleCount, acquiredCount,
+      exchangeAcquiredCount, givenCount, demandDelta, createdAt
     ).run();
 
     const snapshotId = snapshot.meta?.last_row_id;
