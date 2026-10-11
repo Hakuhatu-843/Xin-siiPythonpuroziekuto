@@ -593,6 +593,74 @@ async function getPendingExchanges(request, env) {
   }
 }
 
+async function getAdminStatistics(request, env) {
+  if (!isReviewer(request, env)) return unauthorized(request);
+
+  try {
+    const [tradeStatuses, exchangeStatuses, characterRows, totals] = await Promise.all([
+      env.DB.prepare(
+        "SELECT status, COUNT(*) AS count FROM trades GROUP BY status"
+      ).all(),
+      env.DB.prepare(
+        "SELECT status, COUNT(*) AS count FROM exchange_submissions GROUP BY status"
+      ).all(),
+      env.DB.prepare(
+        `SELECT tc.character_id AS character_id,
+                COUNT(DISTINCT t.id) AS trade_count,
+                SUM(tc.quantity) AS item_count,
+                MAX(t.submitted_at) AS last_submitted_at
+         FROM trade_characters tc
+         INNER JOIN trades t ON t.id = tc.trade_id
+         WHERE t.status = 'approved' AND tc.is_verified = 1
+         GROUP BY tc.character_id
+         ORDER BY trade_count DESC, item_count DESC, tc.character_id ASC`
+      ).all(),
+      env.DB.prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM trades) AS total_trades,
+           (SELECT COUNT(*) FROM exchange_submissions) AS total_exchanges,
+           (SELECT COUNT(DISTINCT character_id) FROM trade_characters tc
+             INNER JOIN trades t ON t.id = tc.trade_id
+             WHERE t.status = 'approved' AND tc.is_verified = 1) AS character_count,
+           (SELECT COUNT(*) FROM trade_characters tc
+             INNER JOIN trades t ON t.id = tc.trade_id
+             WHERE t.status = 'approved' AND tc.is_verified = 1) AS verified_items`
+      ).first(),
+    ]);
+
+    const toCounts = (rows) => Object.fromEntries(
+      (rows.results || []).map((row) => [row.status, Number(row.count || 0)])
+    );
+    return json({
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      trades: {
+        total: Number(totals?.total_trades || 0),
+        pending: toCounts(tradeStatuses).pending || 0,
+        approved: toCounts(tradeStatuses).approved || 0,
+        rejected: toCounts(tradeStatuses).rejected || 0,
+      },
+      exchanges: {
+        total: Number(totals?.total_exchanges || 0),
+        pending: toCounts(exchangeStatuses).pending || 0,
+        approved: toCounts(exchangeStatuses).approved || 0,
+        rejected: toCounts(exchangeStatuses).rejected || 0,
+      },
+      verifiedItems: Number(totals?.verified_items || 0),
+      characterCount: Number(totals?.character_count || 0),
+      characters: (characterRows.results || []).map((row) => ({
+        characterId: row.character_id,
+        tradeCount: Number(row.trade_count || 0),
+        itemCount: Number(row.item_count || 0),
+        lastSubmittedAt: row.last_submitted_at || null,
+      })),
+    }, 200, request);
+  } catch (error) {
+    console.error("getAdminStatistics failed", error);
+    return json({ ok: false, error: "Database error" }, 500, request);
+  }
+}
+
 async function getTrades(request, env) {
   if (!isReviewer(request, env)) return unauthorized(request);
   const url = new URL(request.url);
@@ -1496,6 +1564,10 @@ export default {
 
       if (request.method === "GET" && url.pathname === "/characters/resolve") {
         return resolveMarketCharacterNumber(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/statistics") {
+        return getAdminStatistics(request, env);
       }
 
       if (request.method === "GET" && url.pathname === "/admin/blocked-ips") {
