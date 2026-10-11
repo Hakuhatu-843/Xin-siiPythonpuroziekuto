@@ -53,6 +53,8 @@
     .actions button{flex:1;min-width:120px}
     .approve{border-color:#39876a;color:var(--success)}
     .reject{border-color:#9a4d54;color:var(--danger)}
+    .secondary{border-color:#7b6a9d;color:#d2baff}
+    .ip-action{border-color:#9a4d54;color:var(--danger)}
     .empty{text-align:center;color:var(--muted);padding:24px 8px}
     .footer-actions{display:flex;justify-content:center;margin-top:14px}
     .back{color:var(--accent);text-decoration:none}
@@ -108,6 +110,23 @@
         <div id="records" class="records"></div>
         <div class="footer-actions"><button id="load-more" type="button" hidden>さらに読み込む</button></div>
       </div>
+      <section class="panel">
+        <h2>IP BAN管理</h2>
+        <p class="hint">投稿時にWorkerが取得したIPだけを表示します。BANすると、そのIPからの通常取引・交換の新規投稿を拒否します。共有ネットワークの利用者にも影響する場合があります。</p>
+        <form id="ip-form" class="row">
+          <label style="flex:2">IPアドレスを手動でBAN
+            <input id="ip-input" name="ip" maxlength="45" autocomplete="off" spellcheck="false" placeholder="IPv4 または IPv6" required>
+          </label>
+          <button type="submit" class="ip-action">このIPをBAN</button>
+        </form>
+        <div class="row" style="justify-content:space-between">
+          <strong>現在BAN中のIP</strong>
+          <button id="refresh-ips" type="button">IP一覧を更新</button>
+        </div>
+        <p id="ip-message" class="muted" role="status" aria-live="polite"></p>
+        <p id="ip-error" class="error" role="alert"></p>
+        <div id="blocked-ips" class="records"></div>
+      </section>
       <div class="footer-actions"><button id="logout" type="button">ログアウトしてキーを消去</button></div>
     </section>
   </main>
@@ -120,6 +139,7 @@
     let reviewer = '';
     let loading = false;
     let pages = null;
+    let blockedIpSet = new Set();
     const $ = (selector) => document.querySelector(selector);
     const authPanel = $('#auth-panel');
     const reviewPanel = $('#review-panel');
@@ -224,6 +244,7 @@
       if (kind === 'trade') addFact(facts, '取引価格', record.totalPrice);
       if (record.reviewedBy) addFact(facts, '審査担当者（入力ラベル）', record.reviewedBy);
       if (record.reviewedAt) addFact(facts, '審査日時', dateText(record.reviewedAt));
+      addFact(facts, '投稿元IP', record.clientIp || '取得不可');
       article.append(facts);
 
       const details = el('details');
@@ -245,6 +266,22 @@
         reject.addEventListener('click', () => decide(kind, record, 'rejected', actions));
         actions.append(approve, reject);
         article.append(actions);
+      } else {
+        const actions = el('div', undefined, 'actions');
+        const undo = el('button', '審査を取り消して待ちに戻す', 'secondary');
+        undo.type = 'button';
+        undo.addEventListener('click', () => decide(kind, record, 'pending', actions));
+        actions.append(undo);
+        article.append(actions);
+      }
+      if (record.clientIp) {
+        const ipActions = el('div', undefined, 'actions');
+        const blocked = blockedIpSet.has(record.clientIp);
+        const ipButton = el('button', blocked ? 'このIPのBANを解除' : 'このIPをBAN', blocked ? 'secondary' : 'ip-action');
+        ipButton.type = 'button';
+        ipButton.addEventListener('click', () => changeIpBlock(record.clientIp, blocked ? 'unblock' : 'block'));
+        ipActions.append(ipButton);
+        article.append(ipActions);
       }
       return article;
     }
@@ -313,8 +350,11 @@
 
     async function decide(kind, record, status, actions) {
       if (loading || record.status !== 'pending') return;
-      const actionName = status === 'approved' ? '承認' : '却下';
-      if (!window.confirm(`投稿 #${record.id} を${actionName}しますか？`)) return;
+      const actionName = status === 'approved' ? '承認' : status === 'rejected' ? '却下' : '審査の取り消し';
+      const confirmation = status === 'pending'
+        ? `投稿 #${record.id} の審査結果を取り消して、審査待ちに戻しますか？相場への反映対象から外れます。`
+        : `投稿 #${record.id} を${actionName}しますか？`;
+      if (!window.confirm(confirmation)) return;
       loading = true;
       for (const button of actions.querySelectorAll('button')) button.disabled = true;
       errorBox.textContent = '';
@@ -352,7 +392,12 @@
       reviewPanel.hidden = true;
       authPanel.hidden = false;
       pages = null;
+      blockedIpSet = new Set();
       records.replaceChildren();
+      $('#blocked-ips').replaceChildren();
+      $('#ip-input').value = '';
+      $('#ip-message').textContent = '';
+      $('#ip-error').textContent = '';
       message.textContent = '';
       errorBox.textContent = '';
     }
@@ -375,7 +420,7 @@
         reviewPanel.hidden = false;
         $('#status-filter').value = 'pending';
         $('#type-filter').value = 'all';
-        await refresh(true);
+        await Promise.all([refresh(true), loadBlockedIps()]);
       } catch (cause) {
         adminKey = '';
         authError.textContent = cause instanceof Error ? cause.message : '認証できませんでした。';
@@ -384,6 +429,74 @@
       }
     });
 
+    async function loadBlockedIps() {
+      $('#ip-error').textContent = '';
+      $('#ip-message').textContent = 'IP BAN一覧を読み込み中です…';
+      try {
+        const result = await api('/admin/blocked-ips');
+        if (!Array.isArray(result.blockedIps)) throw new Error('IP一覧の形式が不正です。');
+        blockedIpSet = new Set(result.blockedIps.map((item) => item.ip));
+        const container = $('#blocked-ips');
+        container.replaceChildren();
+        if (result.blockedIps.length === 0) {
+          container.append(el('p', '現在BAN中のIPはありません。', 'empty'));
+        } else {
+          for (const item of result.blockedIps) {
+            const card = el('article', undefined, 'record');
+            const head = el('div', undefined, 'record-head');
+            head.append(el('span', item.ip, 'record-title'));
+            head.append(el('span', 'BAN中', 'badge rejected'));
+            card.append(head);
+            const facts = el('div', undefined, 'facts');
+            addFact(facts, 'BAN日時', dateText(item.blocked_at));
+            card.append(facts);
+            const actions = el('div', undefined, 'actions');
+            const unblock = el('button', 'BANを解除', 'secondary');
+            unblock.type = 'button';
+            unblock.addEventListener('click', () => changeIpBlock(item.ip, 'unblock'));
+            actions.append(unblock);
+            card.append(actions);
+            container.append(card);
+          }
+        }
+        $('#ip-message').textContent = `${result.blockedIps.length}件のIPがBAN中です。`;
+      } catch (cause) {
+        $('#ip-error').textContent = cause instanceof Error ? cause.message : 'IP一覧を取得できませんでした。';
+        $('#ip-message').textContent = 'IP一覧を取得できませんでした。';
+      }
+    }
+
+    async function changeIpBlock(ip, action) {
+      const isBlock = action === 'block';
+      const messageText = isBlock
+        ? `IPアドレス ${ip} をBANしますか？このIPからの新規取引・交換投稿が拒否されます。同じネットワークの別の人にも影響する可能性があります。`
+        : `IPアドレス ${ip} のBANを解除しますか？`;
+      if (!window.confirm(messageText)) return;
+      $('#ip-error').textContent = '';
+      $('#ip-message').textContent = isBlock ? 'IPをBAN中です…' : 'BANを解除中です…';
+      try {
+        const result = await api('/admin/blocked-ips', {
+          method: 'POST',
+          body: JSON.stringify({ ip, action })
+        });
+        if (result.ip !== ip || result.action !== action) throw new Error('IP設定の変更を確認できませんでした。');
+        await loadBlockedIps();
+        await refresh(true, true);
+      } catch (cause) {
+        $('#ip-error').textContent = cause instanceof Error ? cause.message : 'IP設定を変更できませんでした。';
+        $('#ip-message').textContent = '変更結果を確認できていません。';
+      }
+    }
+
+    $('#ip-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const ip = $('#ip-input').value.trim();
+      if (!ip) return;
+      await changeIpBlock(ip, 'block');
+      if (blockedIpSet.has(ip)) $('#ip-input').value = '';
+    });
+
+    $('#refresh-ips').addEventListener('click', loadBlockedIps);
     $('#refresh').addEventListener('click', () => refresh(true));
     $('#load-more').addEventListener('click', () => refresh(false));
     $('#status-filter').addEventListener('change', () => refresh(true));
