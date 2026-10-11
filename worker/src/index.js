@@ -136,13 +136,13 @@ async function getTrades(request, env) {
     const maxRow = await env.DB.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM trades").first();
     const through = page.through === null ? Number(maxRow?.id || 0) : page.through;
     const result = await env.DB.prepare(
-      "WITH page AS (SELECT id, trade_type, total_amount, status, submitted_at, reviewed_by, reviewed_at FROM trades WHERE status = ? AND id > ? AND id <= ? ORDER BY id ASC LIMIT ?) " +
-      "SELECT p.id,p.trade_type,p.total_amount,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,tc.position,tc.character_id,tc.rarity,tc.level,tc.mutation,tc.quantity,tc.is_verified,c.japanese_name " +
+      "WITH page AS (SELECT id, trade_type, total_amount, status, submitted_at, reviewed_by, reviewed_at, client_ip FROM trades WHERE status = ? AND id > ? AND id <= ? ORDER BY id ASC LIMIT ?) " +
+      "SELECT p.id,p.trade_type,p.total_amount,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,p.client_ip,tc.position,tc.character_id,tc.rarity,tc.level,tc.mutation,tc.quantity,tc.is_verified,c.japanese_name " +
       "FROM page p LEFT JOIN trade_characters tc ON tc.trade_id=p.id LEFT JOIN characters c ON c.character_number=tc.character_id ORDER BY p.id ASC,tc.position ASC"
     ).bind(status, page.after, through, page.limit + 1).all();
     const map = new Map();
     for (const row of result.results || []) {
-      if (!map.has(row.id)) map.set(row.id, { id: row.id, tradeType: row.trade_type, totalPrice: row.total_amount, status: row.status, submittedAt: row.submitted_at, reviewedBy: row.reviewed_by, reviewedAt: row.reviewed_at, items: [] });
+      if (!map.has(row.id)) map.set(row.id, { id: row.id, tradeType: row.trade_type, totalPrice: row.total_amount, status: row.status, submittedAt: row.submitted_at, reviewedBy: row.reviewed_by, reviewedAt: row.reviewed_at, clientIp: row.client_ip, items: [] });
       if (row.position !== null) map.get(row.id).items.push({ position: row.position, characterId: row.character_id, characterNumber: row.character_id, characterName: row.japanese_name || row.character_id, rarity: row.rarity, level: row.level, mutation: row.mutation, quantity: row.quantity, isVerified: row.is_verified });
     }
     const all = [...map.values()], hasMore = all.length > page.limit, trades = all.slice(0, page.limit);
@@ -204,13 +204,13 @@ async function getExchanges(request, env) {
     const maxRow = await env.DB.prepare("SELECT COALESCE(MAX(id),0) AS id FROM exchanges").first();
     const through = page.through === null ? Number(maxRow?.id || 0) : page.through;
     const result = await env.DB.prepare(
-      "WITH page AS (SELECT id,exchange_description,status,submitted_at,reviewed_by,reviewed_at FROM exchanges WHERE status=? AND id>? AND id<=? ORDER BY id ASC LIMIT ?) " +
-      "SELECT p.id,p.exchange_description,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,ec.position,ec.character_id,ec.rarity,ec.level,ec.mutation,ec.quantity,ec.is_verified,c.japanese_name " +
+      "WITH page AS (SELECT id,exchange_description,status,submitted_at,reviewed_by,reviewed_at,client_ip FROM exchanges WHERE status=? AND id>? AND id<=? ORDER BY id ASC LIMIT ?) " +
+      "SELECT p.id,p.exchange_description,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,p.client_ip,ec.position,ec.character_id,ec.rarity,ec.level,ec.mutation,ec.quantity,ec.is_verified,c.japanese_name " +
       "FROM page p LEFT JOIN exchange_characters ec ON ec.exchange_id=p.id LEFT JOIN characters c ON c.character_number=ec.character_id ORDER BY p.id ASC,ec.position ASC"
     ).bind(status, page.after, through, page.limit + 1).all();
     const map = new Map();
     for (const row of result.results || []) {
-      if (!map.has(row.id)) map.set(row.id, { id: row.id, exchangeDescription: row.exchange_description, status: row.status, submittedAt: row.submitted_at, reviewedBy: row.reviewed_by, reviewedAt: row.reviewed_at, items: [] });
+      if (!map.has(row.id)) map.set(row.id, { id: row.id, exchangeDescription: row.exchange_description, status: row.status, submittedAt: row.submitted_at, reviewedBy: row.reviewed_by, reviewedAt: row.reviewed_at, clientIp: row.client_ip, items: [] });
       if (row.position !== null) map.get(row.id).items.push({ position: row.position, characterId: row.character_id, characterNumber: row.character_id, characterName: row.japanese_name || row.character_id, rarity: row.rarity, level: row.level, mutation: row.mutation, quantity: row.quantity, isVerified: row.is_verified });
     }
     const all = [...map.values()], hasMore = all.length > page.limit, exchanges = all.slice(0, page.limit);
@@ -223,15 +223,19 @@ async function updateExchangeStatus(request, env, exchangeId) {
   if (!/^\d+$/.test(exchangeId)) return json({ ok: false, error: "Invalid exchange id" }, 400, request);
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400, request); }
-  if (!["approved","rejected"].includes(body?.status) || typeof body?.reviewerId !== "string" ||
+  if (!["pending","approved","rejected"].includes(body?.status) || typeof body?.reviewerId !== "string" ||
       !body.reviewerId.trim() || body.reviewerId.trim().length > 100) return json({ ok: false, error: "Invalid status or reviewer" }, 400, request);
   try {
-    const result = await env.DB.prepare("UPDATE exchanges SET status=?,reviewed_by=?,reviewed_at=? WHERE id=? AND status='pending'")
-      .bind(body.status, body.reviewerId.trim(), new Date().toISOString(), Number(exchangeId)).run();
+    const now = new Date().toISOString();
+    const result = body.status === "pending"
+      ? await env.DB.prepare("UPDATE exchanges SET status='pending',reviewed_by=NULL,reviewed_at=NULL WHERE id=? AND status IN ('approved','rejected')")
+          .bind(Number(exchangeId)).run()
+      : await env.DB.prepare("UPDATE exchanges SET status=?,reviewed_by=?,reviewed_at=? WHERE id=? AND status='pending'")
+          .bind(body.status, body.reviewerId.trim(), now, Number(exchangeId)).run();
     if (Number(result.meta?.changes || 0) === 0) {
       const row = await env.DB.prepare("SELECT status FROM exchanges WHERE id=?").bind(Number(exchangeId)).first();
       if (!row) return json({ ok: false, error: "Exchange not found" }, 404, request);
-      return json({ ok: false, error: "Review already completed" }, 409, request);
+      return json({ ok: false, error: "Review already completed or transition not allowed" }, 409, request);
     }
     await env.DB.prepare("UPDATE exchange_characters SET is_verified=? WHERE exchange_id=?")
       .bind(body.status === "approved" ? 1 : 0, Number(exchangeId)).run();
@@ -284,7 +288,12 @@ async function updateBlockedIp(request, env) {
 
   const ip = typeof body?.ip === "string" ? body.ip.trim() : "";
   const action = body?.action;
-  if (!ip || ip.length > 45 || !["block", "unblock"].includes(action)) {
+  const validIPv4 = (value) => {
+    const parts = value.split(".");
+    return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255);
+  };
+  const validIPv6 = (value) => value.includes(":") && /^[0-9a-fA-F:.]+$/.test(value) && value.length <= 45;
+  if (!ip || ip.length > 45 || !(validIPv4(ip) || validIPv6(ip)) || !["block", "unblock"].includes(action)) {
     return json({ ok: false, error: "Invalid IP or action" }, 400, request);
   }
 
@@ -309,15 +318,19 @@ async function updateTradeStatus(request, env, tradeId) {
   if (!/^\d+$/.test(tradeId)) return json({ ok: false, error: "Invalid trade id" }, 400, request);
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400, request); }
-  if (!["approved","rejected"].includes(body?.status) || typeof body?.reviewerId !== "string" ||
+  if (!["pending","approved","rejected"].includes(body?.status) || typeof body?.reviewerId !== "string" ||
       !body.reviewerId.trim() || body.reviewerId.trim().length > 100) return json({ ok: false, error: "Invalid status or reviewer" }, 400, request);
   try {
-    const result = await env.DB.prepare("UPDATE trades SET status=?,reviewed_by=?,reviewed_at=? WHERE id=? AND status='pending'")
-      .bind(body.status, body.reviewerId.trim(), new Date().toISOString(), Number(tradeId)).run();
+    const now = new Date().toISOString();
+    const result = body.status === "pending"
+      ? await env.DB.prepare("UPDATE trades SET status='pending',reviewed_by=NULL,reviewed_at=NULL WHERE id=? AND status IN ('approved','rejected')")
+          .bind(Number(tradeId)).run()
+      : await env.DB.prepare("UPDATE trades SET status=?,reviewed_by=?,reviewed_at=? WHERE id=? AND status='pending'")
+          .bind(body.status, body.reviewerId.trim(), now, Number(tradeId)).run();
     if (Number(result.meta?.changes || 0) === 0) {
       const row = await env.DB.prepare("SELECT status FROM trades WHERE id=?").bind(Number(tradeId)).first();
       if (!row) return json({ ok: false, error: "Trade not found" }, 404, request);
-      return json({ ok: false, error: "Review already completed" }, 409, request);
+      return json({ ok: false, error: "Review already completed or transition not allowed" }, 409, request);
     }
     await env.DB.prepare("UPDATE trade_characters SET is_verified=? WHERE trade_id=?")
       .bind(body.status === "approved" ? 1 : 0, Number(tradeId)).run();
