@@ -72,11 +72,11 @@
 
     <section id="auth-panel" class="panel auth">
       <h2>審査担当者の認証</h2>
-      <p class="notice">審査専用キーを入力してください。キーはHTTPSで審査APIへ送信し、このページのメモリ内だけで使います。保存はしません。Workerの管理キーとは別のキーです。信頼できる端末・担当者だけに共有してください。</p>
+      <p class="notice">本番Workerの管理キーを入力してください。キーはHTTPSで審査APIへ送信し、このページのメモリ内だけで使います。保存はしません。強い権限を持つキーなので、信頼できる審査担当者と端末だけで使用してください。</p>
       <form id="auth-form">
         <label for="reviewer">審査記録に表示する担当者名</label>
         <input id="reviewer" name="reviewer" maxlength="100" autocomplete="off" required>
-        <label for="review-key">審査専用キー</label>
+        <label for="review-key">Worker管理キー</label>
         <input id="review-key" name="review-key" type="password" autocomplete="off" spellcheck="false" required>
         <p class="hint">担当者名は入力された監査ラベルであり、個人の本人確認には使われません。本人確認は共有管理キーで行われます。</p>
         <button type="submit">認証して審査一覧を開く</button>
@@ -116,7 +116,7 @@
     'use strict';
     const API = 'https://trade-value-api.hakuhatu-okuchi.workers.dev';
     const PAGE_SIZE = 50;
-    let reviewKey = '';
+    let adminKey = '';
     let reviewer = '';
     let loading = false;
     let pages = null;
@@ -150,7 +150,7 @@
           signal: controller.signal,
           headers: {
             Accept: 'application/json',
-            'X-Review-Key': reviewKey,
+            'X-Admin-Key': adminKey,
             ...(options.body ? { 'Content-Type': 'application/json' } : {}),
             ...options.headers
           },
@@ -345,7 +345,7 @@
     }
 
     function lock() {
-      reviewKey = '';
+      adminKey = '';
       reviewer = '';
       $('#review-key').value = '';
       $('#reviewer').value = '';
@@ -366,7 +366,7 @@
         authError.textContent = '担当者名と管理キーを入力してください。';
         return;
       }
-      reviewKey = key;
+      adminKey = key;
       reviewer = label;
       $('#auth-form button[type="submit"]').disabled = true;
       try {
@@ -377,7 +377,7 @@
         $('#type-filter').value = 'all';
         await refresh(true);
       } catch (cause) {
-        reviewKey = '';
+        adminKey = '';
         authError.textContent = cause instanceof Error ? cause.message : '認証できませんでした。';
       } finally {
         $('#auth-form button[type="submit"]').disabled = false;
@@ -389,7 +389,7 @@
     $('#status-filter').addEventListener('change', () => refresh(true));
     $('#type-filter').addEventListener('change', () => refresh(true));
     $('#logout').addEventListener('click', lock);
-    window.addEventListener('pagehide', () => { reviewKey = ''; reviewer = ''; });
+    window.addEventListener('pagehide', () => { adminKey = ''; reviewer = ''; });
   </script>
 </body>
 </html>
