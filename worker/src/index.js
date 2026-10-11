@@ -32,44 +32,18 @@ function json(data, status, request) {
 }
 
 function validatePayload(body) {
-  if (!body || !["single", "bundle", "set"].includes(body.tradeType)) {
-    return "Invalid trade type";
-  }
-
-  if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > 3) {
-    return "Items must contain 1 to 3 entries";
-  }
-
-  if (body.tradeType === "single" && body.items.length !== 1) {
-    return "Single trade must contain one item";
-  }
-
-  if (!Number.isInteger(body.totalPrice) || body.totalPrice < 1 || body.totalPrice > 2_000_000_000) {
-    return "Invalid total price";
-  }
-
+  if (!body || !["single", "bundle", "set"].includes(body.tradeType)) return "Invalid trade type";
+  if (!Array.isArray(body.items) || body.items.length < 1 || body.items.length > 3) return "Items must contain 1 to 3 entries";
+  if (body.tradeType === "single" && body.items.length !== 1) return "Single trade must contain one item";
+  if (!Number.isInteger(body.totalPrice) || body.totalPrice < 1 || body.totalPrice > 2000000000) return "Invalid total price";
+  if (typeof body.submissionId !== "string" || body.submissionId.length < 16 || body.submissionId.length > 100) return "Invalid submission ID";
   for (const item of body.items) {
-    if (
-      typeof item.characterId !== "string" ||
-      item.characterId.length < 1 ||
-      item.characterId.length > 100 ||
-      typeof item.rarity !== "string" ||
-      item.rarity.length < 1 ||
-      item.rarity.length > 50 ||
-      typeof item.mutation !== "string" ||
-      item.mutation.length < 1 ||
-      item.mutation.length > 50 ||
-      !Number.isInteger(item.level) ||
-      item.level < 1 ||
-      item.level > 301 ||
-      !Number.isInteger(item.quantity) ||
-      item.quantity < 1 ||
-      item.quantity > 9999
-    ) {
-      return "Invalid trade item";
-    }
+    if (typeof item.characterNumber !== "string" || !/^\d{3}$/.test(item.characterNumber) ||
+        typeof item.rarity !== "string" || item.rarity.length < 1 || item.rarity.length > 50 ||
+        typeof item.mutation !== "string" || item.mutation.length < 1 || item.mutation.length > 50 ||
+        !Number.isInteger(item.level) || item.level < 1 || item.level > 301 ||
+        !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 9999) return "Invalid trade item";
   }
-
   return null;
 }
 
@@ -86,170 +60,202 @@ async function isBlocked(env, ip) {
 async function isRateLimited(env, ip) {
   if (!ip) return false;
   const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  const row = await env.DB
-    .prepare("SELECT COUNT(*) AS count FROM trades WHERE client_ip = ? AND submitted_at >= ?")
-    .bind(ip, since)
-    .first();
+  const row = await env.DB.prepare(
+    "SELECT (SELECT COUNT(*) FROM trades WHERE client_ip = ? AND submitted_at >= ?) + (SELECT COUNT(*) FROM exchanges WHERE client_ip = ? AND submitted_at >= ?) AS count"
+  ).bind(ip, since, ip, since).first();
   return Number(row?.count || 0) >= 10;
 }
 
+async function validateCatalogItems(env, items) {
+  for (const item of items) {
+    const row = await env.DB.prepare("SELECT rarity, is_tradable FROM characters WHERE character_number = ?")
+      .bind(item.characterNumber).first();
+    if (!row || Number(row.is_tradable) !== 1 || row.rarity !== item.rarity) return "Character number not found";
+  }
+  return null;
+}
+
+async function getCharacters(request, env) {
+  const result = await env.DB.prepare("SELECT character_number, english_name, japanese_name, rarity FROM characters WHERE is_tradable = 1 ORDER BY character_number").all();
+  return json({ ok: true, characters: (result.results || []).map(row => ({
+    characterNumber: row.character_number, characterId: row.character_number,
+    characterName: row.japanese_name, englishName: row.english_name, rarity: row.rarity
+  })) }, 200, request);
+}
+
 async function createTrade(request, env) {
-  const clientIp = getClientIp(request);
-
+  const ip = getClientIp(request);
   try {
-    if (await isBlocked(env, clientIp)) {
-      return json({ ok: false, error: "Access blocked" }, 403, request);
-    }
-    if (await isRateLimited(env, clientIp)) {
-      return json({ ok: false, error: "Too many submissions. Please try again later." }, 429, request);
-    }
-  } catch (error) {
-    console.error("abuse check failed", error);
-    return json({ ok: false, error: "Database error" }, 500, request);
-  }
-
+    if (await isBlocked(env, ip)) return json({ ok: false, error: "Access blocked" }, 403, request);
+    if (await isRateLimited(env, ip)) return json({ ok: false, error: "Too many submissions. Please try again later." }, 429, request);
+  } catch (error) { console.error("trade abuse check failed", error); return json({ ok: false, error: "Database error" }, 500, request); }
   let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400, request); }
+  const validationError = validatePayload(body);
+  if (validationError) return json({ ok: false, error: validationError }, 400, request);
   try {
-    body = await request.json();
-  } catch {
-    return json({ ok: false, error: "Invalid JSON" }, 400, request);
-  }
-
-  const error = validatePayload(body);
-  if (error) {
-    return json({ ok: false, error }, 400, request);
-  }
-
-  const submittedAt = new Date().toISOString();
-
-  try {
-    const parent = env.DB
-      .prepare(
-        "INSERT INTO trades (trade_type, total_amount, status, submitted_at, client_ip) VALUES (?, ?, 'pending', ?, ?)"
-      )
-      .bind(body.tradeType, body.totalPrice, submittedAt, clientIp);
-
+    const catalogError = await validateCatalogItems(env, body.items);
+    if (catalogError) return json({ ok: false, error: catalogError }, 400, request);
+    const existing = await env.DB.prepare("SELECT id, status, submitted_at FROM trades WHERE submission_id = ?").bind(body.submissionId).first();
+    if (existing) return json({ ok: true, tradeId: existing.id, status: existing.status, submittedAt: existing.submitted_at, duplicate: true }, 200, request);
+    const submittedAt = new Date().toISOString();
     const statements = [
-      parent,
-      ...body.items.map((item, index) =>
-        env.DB
-          .prepare(
-            "INSERT INTO trade_characters (trade_id, position, character_id, rarity, level, mutation, quantity, is_verified) VALUES (last_insert_rowid(), ?, ?, ?, ?, ?, ?, 0)"
-          )
-          .bind(
-            index + 1,
-            item.characterId,
-            item.rarity,
-            item.level,
-            item.mutation,
-            item.quantity
-          )
-      ),
+      env.DB.prepare("INSERT INTO trades (submission_id, trade_type, total_amount, status, submitted_at, client_ip) VALUES (?, ?, ?, 'pending', ?, ?)")
+        .bind(body.submissionId, body.tradeType, body.totalPrice, submittedAt, ip),
+      ...body.items.map((item, i) => env.DB.prepare("INSERT INTO trade_characters (trade_id, position, character_id, rarity, level, mutation, quantity, is_verified) SELECT id, ?, ?, ?, ?, ?, ?, 0 FROM trades WHERE submission_id = ?")
+        .bind(i + 1, item.characterNumber, item.rarity, item.level, item.mutation, item.quantity, body.submissionId))
     ];
-
-    const results = await env.DB.batch(statements);
-    const tradeId = results?.[0]?.meta?.last_row_id;
-    if (!tradeId) {
-      throw new Error("D1 did not return a trade id");
-    }
-
-    return json(
-      {
-        ok: true,
-        tradeId,
-        status: "pending",
-        submittedAt,
-      },
-      201,
-      request
-    );
+    const result = await env.DB.batch(statements);
+    const tradeId = result?.[0]?.meta?.last_row_id;
+    if (!tradeId) throw new Error("D1 did not return a trade id");
+    return json({ ok: true, tradeId, status: "pending", submittedAt }, 201, request);
   } catch (error) {
+    if (String(error?.message || "").toLowerCase().includes("unique")) {
+      const existing = await env.DB.prepare("SELECT id, status, submitted_at FROM trades WHERE submission_id = ?").bind(body.submissionId).first();
+      if (existing) return json({ ok: true, tradeId: existing.id, status: existing.status, submittedAt: existing.submitted_at, duplicate: true }, 200, request);
+    }
     console.error("createTrade failed", error);
     return json({ ok: false, error: "Database error" }, 500, request);
   }
 }
 
+function pageParams(url) {
+  const limit = Number(url.searchParams.get("limit") || "50");
+  const after = Number(url.searchParams.get("after") || "0");
+  const throughRaw = url.searchParams.get("through");
+  if (!Number.isInteger(limit) || limit < 1 || !Number.isSafeInteger(after) || after < 0 ||
+      (throughRaw !== null && (!Number.isSafeInteger(Number(throughRaw)) || Number(throughRaw) < 0))) return null;
+  return { limit: Math.min(limit, 100), after, through: throughRaw === null ? null : Number(throughRaw) };
+}
+
 async function getTrades(request, env) {
   if (!isAdmin(request, env)) return unauthorized(request);
-  const url = new URL(request.url);
-  const rawLimit = Number(url.searchParams.get("limit") || "50");
-  const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
-  const status = url.searchParams.get("status");
-
-  if (status && !["pending", "approved", "rejected"].includes(status)) {
-    return json({ ok: false, error: "Invalid status" }, 400, request);
-  }
-
-  const where = status ? "WHERE t.status = ?" : "";
-  const query = `
-    SELECT
-      t.id,
-      t.trade_type,
-      t.total_amount,
-      t.status,
-      t.submitted_at,
-      t.client_ip,
-      tc.position,
-      tc.character_id,
-      tc.rarity,
-      tc.level,
-      tc.mutation,
-      tc.quantity,
-      tc.is_verified
-    FROM trades t
-    LEFT JOIN trade_characters tc ON tc.trade_id = t.id
-    ${where}
-    ORDER BY t.id DESC, tc.position ASC
-    LIMIT ?
-  `;
-
+  const url = new URL(request.url), status = url.searchParams.get("status") || "pending", page = pageParams(url);
+  if (!page || !["pending", "approved", "rejected"].includes(status)) return json({ ok: false, error: "Invalid pagination or status" }, 400, request);
   try {
-    const bindings = status ? [status, limit * 3] : [limit * 3];
-    const result = await env.DB.prepare(query).bind(...bindings).all();
-
-    const trades = new Map();
-
+    const maxRow = await env.DB.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM trades").first();
+    const through = page.through === null ? Number(maxRow?.id || 0) : page.through;
+    const result = await env.DB.prepare(
+      "WITH page AS (SELECT id, trade_type, total_amount, status, submitted_at, reviewed_by, reviewed_at FROM trades WHERE status = ? AND id > ? AND id <= ? ORDER BY id ASC LIMIT ?) " +
+      "SELECT p.id,p.trade_type,p.total_amount,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,tc.position,tc.character_id,tc.rarity,tc.level,tc.mutation,tc.quantity,tc.is_verified,c.japanese_name " +
+      "FROM page p LEFT JOIN trade_characters tc ON tc.trade_id=p.id LEFT JOIN characters c ON c.character_number=tc.character_id ORDER BY p.id ASC,tc.position ASC"
+    ).bind(status, page.after, through, page.limit + 1).all();
+    const map = new Map();
     for (const row of result.results || []) {
-      if (!trades.has(row.id)) {
-        trades.set(row.id, {
-          id: row.id,
-          tradeType: row.trade_type,
-          totalPrice: row.total_amount,
-          status: row.status,
-          submittedAt: row.submitted_at,
-          clientIp: row.client_ip,
-          items: [],
-        });
-      }
-
-      if (row.position !== null) {
-        trades.get(row.id).items.push({
-          position: row.position,
-          characterId: row.character_id,
-          rarity: row.rarity,
-          level: row.level,
-          mutation: row.mutation,
-          quantity: row.quantity,
-          isVerified: row.is_verified,
-        });
-      }
-
-      if (trades.size >= limit) {
-        const lastId = row.id;
-        const sameTradeRows = result.results.filter((r) => r.id === lastId);
-        if (sameTradeRows.length > 0) continue;
-      }
+      if (!map.has(row.id)) map.set(row.id, { id: row.id, tradeType: row.trade_type, totalPrice: row.total_amount, status: row.status, submittedAt: row.submitted_at, reviewedBy: row.reviewed_by, reviewedAt: row.reviewed_at, items: [] });
+      if (row.position !== null) map.get(row.id).items.push({ position: row.position, characterId: row.character_id, characterNumber: row.character_id, characterName: row.japanese_name || row.character_id, rarity: row.rarity, level: row.level, mutation: row.mutation, quantity: row.quantity, isVerified: row.is_verified });
     }
+    const all = [...map.values()], hasMore = all.length > page.limit, trades = all.slice(0, page.limit);
+    return json({ ok: true, trades, throughCursor: through, hasMore, nextCursor: hasMore ? trades[trades.length - 1].id : null }, 200, request);
+  } catch (error) { console.error("getTrades failed", error); return json({ ok: false, error: "Database error" }, 500, request); }
+}
 
-    return json(
-      { ok: true, trades: Array.from(trades.values()).slice(0, limit) },
-      200,
-      request
-    );
+async function createExchange(request, env) {
+  const ip = getClientIp(request);
+  try {
+    if (await isBlocked(env, ip)) return json({ ok: false, error: "Access blocked" }, 403, request);
+    if (await isRateLimited(env, ip)) return json({ ok: false, error: "Too many submissions. Please try again later." }, 429, request);
+  } catch (error) { console.error("exchange abuse check failed", error); return json({ ok: false, error: "Database error" }, 500, request); }
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400, request); }
+  if (!body || typeof body.submissionId !== "string" || body.submissionId.length < 16 || body.submissionId.length > 100 ||
+      typeof body.exchangeDescription !== "string" || body.exchangeDescription.trim().length < 1 || body.exchangeDescription.trim().length > 1000 ||
+      !Array.isArray(body.items) || body.items.length < 1 || body.items.length > 3) {
+    return json({ ok: false, error: "Invalid exchange description" }, 400, request);
+  }
+  for (const item of body.items) {
+    if (typeof item.characterNumber !== "string" || !/^\d{3}$/.test(item.characterNumber) ||
+        typeof item.rarity !== "string" || typeof item.mutation !== "string" || !item.mutation ||
+        !Number.isInteger(item.level) || item.level < 1 || item.level > 301 ||
+        !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 9999) {
+      return json({ ok: false, error: "Invalid trade item" }, 400, request);
+    }
+  }
+  try {
+    const catalogError = await validateCatalogItems(env, body.items);
+    if (catalogError) return json({ ok: false, error: catalogError }, 400, request);
+    const existing = await env.DB.prepare("SELECT id,status,submitted_at FROM exchanges WHERE submission_id=?").bind(body.submissionId).first();
+    if (existing) return json({ ok: true, exchangeId: existing.id, status: existing.status, submittedAt: existing.submitted_at, duplicate: true }, 200, request);
+    const submittedAt = new Date().toISOString();
+    const statements = [
+      env.DB.prepare("INSERT INTO exchanges (submission_id,exchange_description,status,submitted_at,client_ip) VALUES (?,?,'pending',?,?)")
+        .bind(body.submissionId, body.exchangeDescription.trim(), submittedAt, ip),
+      ...body.items.map((item, i) => env.DB.prepare("INSERT INTO exchange_characters (exchange_id,position,character_id,rarity,level,mutation,quantity,is_verified) SELECT id,?,?,?,?,?,?,0 FROM exchanges WHERE submission_id=?")
+        .bind(i + 1, item.characterNumber, item.rarity, item.level, item.mutation, item.quantity, body.submissionId))
+    ];
+    const result = await env.DB.batch(statements), exchangeId = result?.[0]?.meta?.last_row_id;
+    if (!exchangeId) throw new Error("D1 did not return an exchange id");
+    return json({ ok: true, exchangeId, status: "pending", submittedAt }, 201, request);
   } catch (error) {
-    console.error("getTrades failed", error);
+    if (String(error?.message || "").toLowerCase().includes("unique")) {
+      const existing = await env.DB.prepare("SELECT id,status,submitted_at FROM exchanges WHERE submission_id=?").bind(body.submissionId).first();
+      if (existing) return json({ ok: true, exchangeId: existing.id, status: existing.status, submittedAt: existing.submitted_at, duplicate: true }, 200, request);
+    }
+    console.error("createExchange failed", error);
     return json({ ok: false, error: "Database error" }, 500, request);
   }
+}
+
+async function getExchanges(request, env) {
+  if (!isAdmin(request, env)) return unauthorized(request);
+  const url = new URL(request.url), status = url.searchParams.get("status") || "pending", page = pageParams(url);
+  if (!page || !["pending", "approved", "rejected"].includes(status)) return json({ ok: false, error: "Invalid pagination or status" }, 400, request);
+  try {
+    const maxRow = await env.DB.prepare("SELECT COALESCE(MAX(id),0) AS id FROM exchanges").first();
+    const through = page.through === null ? Number(maxRow?.id || 0) : page.through;
+    const result = await env.DB.prepare(
+      "WITH page AS (SELECT id,exchange_description,status,submitted_at,reviewed_by,reviewed_at FROM exchanges WHERE status=? AND id>? AND id<=? ORDER BY id ASC LIMIT ?) " +
+      "SELECT p.id,p.exchange_description,p.status,p.submitted_at,p.reviewed_by,p.reviewed_at,ec.position,ec.character_id,ec.rarity,ec.level,ec.mutation,ec.quantity,ec.is_verified,c.japanese_name " +
+      "FROM page p LEFT JOIN exchange_characters ec ON ec.exchange_id=p.id LEFT JOIN characters c ON c.character_number=ec.character_id ORDER BY p.id ASC,ec.position ASC"
+    ).bind(status, page.after, through, page.limit + 1).all();
+    const map = new Map();
+    for (const row of result.results || []) {
+      if (!map.has(row.id)) map.set(row.id, { id: row.id, exchangeDescription: row.exchange_description, status: row.status, submittedAt: row.submitted_at, reviewedBy: row.reviewed_by, reviewedAt: row.reviewed_at, items: [] });
+      if (row.position !== null) map.get(row.id).items.push({ position: row.position, characterId: row.character_id, characterNumber: row.character_id, characterName: row.japanese_name || row.character_id, rarity: row.rarity, level: row.level, mutation: row.mutation, quantity: row.quantity, isVerified: row.is_verified });
+    }
+    const all = [...map.values()], hasMore = all.length > page.limit, exchanges = all.slice(0, page.limit);
+    return json({ ok: true, exchanges, throughCursor: through, hasMore, nextCursor: hasMore ? exchanges[exchanges.length - 1].id : null }, 200, request);
+  } catch (error) { console.error("getExchanges failed", error); return json({ ok: false, error: "Database error" }, 500, request); }
+}
+
+async function updateExchangeStatus(request, env, exchangeId) {
+  if (!isAdmin(request, env)) return unauthorized(request);
+  if (!/^\d+$/.test(exchangeId)) return json({ ok: false, error: "Invalid exchange id" }, 400, request);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400, request); }
+  if (!["approved","rejected"].includes(body?.status) || typeof body?.reviewerId !== "string" ||
+      !body.reviewerId.trim() || body.reviewerId.trim().length > 100) return json({ ok: false, error: "Invalid status or reviewer" }, 400, request);
+  try {
+    const result = await env.DB.prepare("UPDATE exchanges SET status=?,reviewed_by=?,reviewed_at=? WHERE id=? AND status='pending'")
+      .bind(body.status, body.reviewerId.trim(), new Date().toISOString(), Number(exchangeId)).run();
+    if (Number(result.meta?.changes || 0) === 0) {
+      const row = await env.DB.prepare("SELECT status FROM exchanges WHERE id=?").bind(Number(exchangeId)).first();
+      if (!row) return json({ ok: false, error: "Exchange not found" }, 404, request);
+      return json({ ok: false, error: "Review already completed" }, 409, request);
+    }
+    await env.DB.prepare("UPDATE exchange_characters SET is_verified=? WHERE exchange_id=?")
+      .bind(body.status === "approved" ? 1 : 0, Number(exchangeId)).run();
+    return json({ ok: true, exchangeId: Number(exchangeId), status: body.status }, 200, request);
+  } catch (error) { console.error("updateExchangeStatus failed", error); return json({ ok: false, error: "Database error" }, 500, request); }
+}
+
+async function getAdminStatistics(request, env) {
+  if (!isAdmin(request, env)) return unauthorized(request);
+  try {
+    const countStatuses = async (table) => {
+      const rows = await env.DB.prepare("SELECT status,COUNT(*) AS count FROM " + table + " GROUP BY status").all();
+      const result = { total: 0, pending: 0, approved: 0, rejected: 0 };
+      for (const row of rows.results || []) { const n = Number(row.count || 0); result[row.status] = n; result.total += n; }
+      return result;
+    };
+    const trades = await countStatuses("trades"), exchanges = await countStatuses("exchanges");
+    const verified = await env.DB.prepare("SELECT COUNT(*) AS count FROM trade_characters tc JOIN trades t ON t.id=tc.trade_id WHERE t.status='approved' AND tc.is_verified=1").first();
+    const chars = await env.DB.prepare(
+      "SELECT tc.character_id AS characterId,COUNT(DISTINCT tc.trade_id) AS tradeCount,SUM(tc.quantity) AS itemCount,MAX(t.submitted_at) AS lastSubmittedAt " +
+      "FROM trade_characters tc JOIN trades t ON t.id=tc.trade_id WHERE t.status='approved' AND tc.is_verified=1 GROUP BY tc.character_id ORDER BY tc.character_id"
+    ).all();
+    return json({ ok: true, trades, exchanges, verifiedItems: Number(verified?.count || 0), characterCount: (chars.results || []).length, characters: chars.results || [], generatedAt: new Date().toISOString() }, 200, request);
+  } catch (error) { console.error("getAdminStatistics failed", error); return json({ ok: false, error: "Database error" }, 500, request); }
 }
 
 
@@ -300,53 +306,23 @@ async function updateBlockedIp(request, env) {
 
 async function updateTradeStatus(request, env, tradeId) {
   if (!isAdmin(request, env)) return unauthorized(request);
-  if (!/^\d+$/.test(tradeId)) {
-    return json({ ok: false, error: "Invalid trade id" }, 400, request);
-  }
-
+  if (!/^\d+$/.test(tradeId)) return json({ ok: false, error: "Invalid trade id" }, 400, request);
   let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400, request); }
+  if (!["approved","rejected"].includes(body?.status) || typeof body?.reviewerId !== "string" ||
+      !body.reviewerId.trim() || body.reviewerId.trim().length > 100) return json({ ok: false, error: "Invalid status or reviewer" }, 400, request);
   try {
-    body = await request.json();
-  } catch {
-    return json({ ok: false, error: "Invalid JSON" }, 400, request);
-  }
-
-  if (!["pending", "approved", "rejected"].includes(body?.status)) {
-    return json({ ok: false, error: "Invalid status" }, 400, request);
-  }
-
-  const id = Number(tradeId);
-
-  try {
-    const trade = await env.DB
-      .prepare("SELECT id FROM trades WHERE id = ?")
-      .bind(id)
-      .first();
-
-    if (!trade) {
-      return json({ ok: false, error: "Trade not found" }, 404, request);
+    const result = await env.DB.prepare("UPDATE trades SET status=?,reviewed_by=?,reviewed_at=? WHERE id=? AND status='pending'")
+      .bind(body.status, body.reviewerId.trim(), new Date().toISOString(), Number(tradeId)).run();
+    if (Number(result.meta?.changes || 0) === 0) {
+      const row = await env.DB.prepare("SELECT status FROM trades WHERE id=?").bind(Number(tradeId)).first();
+      if (!row) return json({ ok: false, error: "Trade not found" }, 404, request);
+      return json({ ok: false, error: "Review already completed" }, 409, request);
     }
-
-    const verified = body.status === "approved" ? 1 : 0;
-
-    await env.DB.batch([
-      env.DB
-        .prepare("UPDATE trades SET status = ? WHERE id = ?")
-        .bind(body.status, id),
-      env.DB
-        .prepare("UPDATE trade_characters SET is_verified = ? WHERE trade_id = ?")
-        .bind(verified, id),
-    ]);
-
-    return json(
-      { ok: true, tradeId: id, status: body.status },
-      200,
-      request
-    );
-  } catch (error) {
-    console.error("updateTradeStatus failed", error);
-    return json({ ok: false, error: "Database error" }, 500, request);
-  }
+    await env.DB.prepare("UPDATE trade_characters SET is_verified=? WHERE trade_id=?")
+      .bind(body.status === "approved" ? 1 : 0, Number(tradeId)).run();
+    return json({ ok: true, tradeId: Number(tradeId), status: body.status }, 200, request);
+  } catch (error) { console.error("updateTradeStatus failed", error); return json({ ok: false, error: "Database error" }, 500, request); }
 }
 
 async function getMarketValue(request, env) {
@@ -690,8 +666,29 @@ export default {
         return json({ status: "ok" }, 200, request);
       }
 
+      if (request.method === "GET" && url.pathname === "/characters") {
+        return getCharacters(request, env);
+      }
+
       if (request.method === "POST" && url.pathname === "/trades") {
         return createTrade(request, env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/exchanges") {
+        return createExchange(request, env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/exchanges") {
+        return getExchanges(request, env);
+      }
+
+      const exchangeStatusMatch = url.pathname.match(/^\/exchanges\/(\d+)\/status$/);
+      if (request.method === "POST" && exchangeStatusMatch) {
+        return updateExchangeStatus(request, env, exchangeStatusMatch[1]);
+      }
+
+      if (request.method === "GET" && url.pathname === "/admin/statistics") {
+        return getAdminStatistics(request, env);
       }
 
       const statusMatch = url.pathname.match(/^\/trades\/(\d+)\/status$/);

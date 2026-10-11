@@ -1,22 +1,45 @@
 # Trade Value API (Cloudflare Workers + D1)
 
-GitHub Pagesの取引入力フォームから受け取ったデータをCloudflare D1へ保存します。
+The GitHub Pages form submits trade records to Cloudflare Workers. New submissions stay pending until a reviewer approves or rejects them. Exchange-only submissions do not include a price and are excluded from price calculations.
 
-## エンドポイント
+## API
 
-- GET /health
-- POST /trades
-- GET /trades/{trade_id}
+- `GET /health` — health check
+- `GET /characters` — returns the 154 tradeable characters; Ancient entries are management-only
+- `POST /trades` — submit a priced single/bundle/set trade
+- `POST /exchanges` — submit an exchange-only record with no price
+- `GET /trades?status=pending&limit=50&after=0` — admin-only paginated review list
+- `GET /exchanges?status=pending&limit=50&after=0` — admin-only paginated review list
+- `POST /trades/{id}/status` and `POST /exchanges/{id}/status` — admin review
+- `GET /admin/statistics` — admin-only aggregate statistics
+- `GET /market-value` — median price estimate when enough approved single-trade samples exist
+- `GET/POST /admin/blocked-ips` — admin-only abuse controls
 
-新規取引は `pending` として保存します。相場計算へ反映する前にDiscord側で審査する前提です。
+Admin endpoints require the Worker secret `ADMIN_KEY` via the `X-Admin-Key` header. Set it as a Worker secret; never commit the key to GitHub or the HTML pages.
 
-## 初回セットアップ
+## Apply migrations and deploy
 
-1. CloudflareでD1データベースを作成し、データベースIDを `worker/wrangler.toml` の `database_id` に入れる。
-2. D1へ `worker/schema.sql` を適用する。
-3. `worker/` で `npx wrangler deploy` を実行する。
-4. 発行された `https://....workers.dev` のURLを `index.html` の `API_BASE` に設定する。
+From the repository Codespace terminal:
 
-## ローカル確認
+```sh
+cd worker
+npm install
+npx wrangler d1 migrations apply trade-value --remote
+npx wrangler deploy
+```
 
-WranglerでローカルD1を使う場合は、プロジェクトのWorker設定に従ってローカルDBへschemaを適用してからdev serverを起動してください。
+Migrations `0004` and `0005` add the canonical character catalog and exchange workflow, then clear the existing test-only submissions and market snapshots as explicitly requested. They retain the catalog and the blocked-IP configuration table. Review the migration files before applying them to any database that contains real records.
+
+Configure `ADMIN_KEY` once in Cloudflare Workers secrets, if it has not already been configured:
+
+```sh
+npx wrangler secret put ADMIN_KEY
+```
+
+## Local checks
+
+```sh
+npm run dev
+```
+
+The GitHub Actions workflow checks Worker/frontend JavaScript and applies the complete migration sequence to an in-memory SQLite database, including assertions for catalog counts and cleanup.

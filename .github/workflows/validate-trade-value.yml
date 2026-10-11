@@ -11,39 +11,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Check Worker JavaScript
         run: node --check worker/src/index.js
-
-      - name: Check frontend JavaScript
+      - name: Check all frontend JavaScript
         run: |
           python - <<'PY'
           from pathlib import Path
           import re
-          html = Path("index.html").read_text(encoding="utf-8")
-          scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
-          assert scripts, "No inline script found"
-          Path("/tmp/frontend.js").write_text(scripts[-1], encoding="utf-8")
+          for name in ("index.html", "admin.html", "stats.html"):
+              html = Path(name).read_text(encoding="utf-8")
+              scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
+              assert scripts, f"No inline script found in {name}"
+              Path(f"/tmp/{name}.js").write_text("\n".join(scripts), encoding="utf-8")
           PY
-          node --check /tmp/frontend.js
-
-      - name: Validate D1 schema
+          node --check /tmp/index.html.js
+          node --check /tmp/admin.html.js
+          node --check /tmp/stats.html.js
+      - name: Apply all D1 migrations and verify catalog
         run: |
           python - <<'PY'
           import sqlite3
           from pathlib import Path
-          sql = Path("worker/schema.sql").read_text(encoding="utf-8")
           con = sqlite3.connect(":memory:")
-          con.executescript(sql)
-          tables = {row[0] for row in con.execute(
-              "SELECT name FROM sqlite_master WHERE type='table'"
-          )}
-          required = {"trades", "trade_characters"}
-          missing = required - tables
-          assert not missing, f"Missing tables: {missing}"
-          print("D1 schema OK:", sorted(required))
+          con.execute("PRAGMA foreign_keys = ON")
+          migrations = sorted(Path("worker/migrations").glob("*.sql"))
+          assert len(migrations) == 5, f"Expected 5 migrations, got {len(migrations)}"
+          for migration in migrations:
+              con.executescript(migration.read_text(encoding="utf-8"))
+          tradeable = con.execute("SELECT COUNT(*) FROM characters WHERE is_tradable=1").fetchone()[0]
+          ancient = con.execute("SELECT COUNT(*) FROM characters WHERE rarity='ancient' AND is_tradable=0").fetchone()[0]
+          assert tradeable == 154, f"Expected 154 tradeable characters, got {tradeable}"
+          assert ancient == 13, f"Expected 13 management-only Ancient characters, got {ancient}"
+          assert con.execute("SELECT japanese_name FROM characters WHERE character_number='005'").fetchone()[0] == "ギャングスター・フテラ"
+          assert con.execute("SELECT japanese_name FROM characters WHERE character_number='703'").fetchone()[0] == "騎士団長"
+          for table in ("trades", "trade_characters", "exchanges", "exchange_characters", "market_snapshots", "market_snapshot_mutations"):
+              count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+              assert count == 0, f"Cleanup failed for {table}: {count} rows remain"
+          print(f"Migration checks passed: {tradeable} tradeable + {ancient} management-only characters; test data cleared.")
           PY
