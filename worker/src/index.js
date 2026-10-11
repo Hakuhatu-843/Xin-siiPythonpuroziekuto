@@ -41,7 +41,7 @@ function validatePayload(body) {
     if (typeof item.characterNumber !== "string" || !/^\d{3}$/.test(item.characterNumber) ||
         typeof item.rarity !== "string" || item.rarity.length < 1 || item.rarity.length > 50 ||
         typeof item.mutation !== "string" || item.mutation.length < 1 || item.mutation.length > 50 ||
-        !["acquired", "given"].includes(body.direction) ||
+        (body.direction !== undefined && !["acquired", "given"].includes(body.direction)) ||
         !Number.isInteger(item.level) || item.level < 1 || item.level > 301 ||
         !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 9999) return "Invalid trade item";
   }
