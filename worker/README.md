@@ -24,9 +24,10 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 - `GET /characters/resolve?number=001`: resolve a three-digit number.
 - `POST /trades`: create a `pending` trade. Web submissions use `characterNumber` and a UUID `submissionId`; retries are idempotent.
 - `POST /exchanges`: create a price-free exchange submission with an exchange description and numbered characters. It is stored separately from priced trades and never enters market calculations.
-- `GET /trades?status=pending&limit=50&after=0`: authenticated review queue (`X-Admin-Key`), oldest first. The first response fixes `throughCursor`; send that value with `nextCursor` as `after` on every later page while `hasMore` is true. This bounds the review run so submissions arriving during pagination are picked up on the next poll. The page limit counts parent submissions; all of each submission's details are returned.
+- `GET /trades?status=pending&limit=50&after=0`: authenticated review queue (`X-Admin-Key` for the Bot or `X-Review-Key` for Web review), oldest first. The first response fixes `throughCursor`; send that value with `nextCursor` as `after` on every later page while `hasMore` is true. This bounds the review run so submissions arriving during pagination are picked up on the next poll. The page limit counts parent submissions; all of each submission's details are returned.
+- `GET /trades?status=approved|rejected&limit=50&after=0`: authenticated review history with the same stable pagination fields. Responses include the stored reviewer label and review timestamp.
 - `POST /trades/:id/status`: authenticated, one-time `approved` or `rejected` transition with reviewer history.
-- `GET /exchanges?status=pending&limit=50&after=0`: authenticated exchange review queue, with the same stable upper-bound cursor and complete-detail behavior.
+- `GET /exchanges?status=pending|approved|rejected&limit=50&after=0`: authenticated exchange review queue/history (`X-Admin-Key` or `X-Review-Key`), with the same stable upper-bound cursor and complete-detail behavior.
 - `POST /exchanges/:id/status`: authenticated, one-time exchange approval or rejection with reviewer history.
 - `GET /market-value`: market value from eligible approved single trades.
 - `GET /market-snapshot?characterNumber=001` (or the compatible `characterName` parameter): latest D1 snapshot and change directions.
@@ -43,3 +44,9 @@ The current snapshot implementation uses level windows of ±20 and treats level 
 Daily snapshots are scheduled at `0 15 * * *` UTC. Each character's snapshot and mutation rows are written in one D1 batch so a failed batch does not leave a partial snapshot.
 
 Set `ADMIN_KEY` as a Worker secret, and provide the same value to the Bot host as `WORKER_ADMIN_KEY`. Never store either value in source code or commit it.
+
+## Web review page
+
+The static reviewer UI is `../admin.html`, published at `/admin.html` by the GitHub Pages root. It uses a dedicated Worker `REVIEW_KEY` in the `X-Review-Key` header; existing Bot requests using `X-Admin-Key` remain supported. The review key is entered at runtime, held only in page memory, and cleared on logout/page close. It is not embedded in the page, URL, or browser storage.
+
+Set `REVIEW_KEY` as a separate Worker secret (for example, from the `worker/` directory run `npx wrangler secret put REVIEW_KEY`) and provide it to reviewers through a trusted secret-sharing method. It grants access only to review queues and one-time review decisions; it cannot manage blocked IPs or replace `ADMIN_KEY`. Never put it in source code, query strings, logs, or browser storage. The reviewer name entered in the page is an audit label supplied by the client, not independently authenticated identity. Per-reviewer accounts are not implemented. Do not expose the page with a key prefilled.

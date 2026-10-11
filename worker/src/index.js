@@ -52,7 +52,7 @@ function corsHeaders(origin) {
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Admin-Key",
+    "Access-Control-Allow-Headers": "Content-Type, X-Admin-Key, X-Review-Key",
     "Content-Type": "application/json; charset=utf-8",
     "Vary": "Origin",
   };
@@ -61,6 +61,12 @@ function corsHeaders(origin) {
 function isAdmin(request, env) {
   const key = request.headers.get("X-Admin-Key");
   return Boolean(env.ADMIN_KEY && key && key === env.ADMIN_KEY);
+}
+
+function isReviewer(request, env) {
+  const reviewKey = request.headers.get("X-Review-Key");
+  return Boolean(env.REVIEW_KEY && reviewKey && reviewKey === env.REVIEW_KEY) ||
+    isAdmin(request, env);
 }
 
 function unauthorized(request) {
@@ -487,7 +493,7 @@ async function getCharacters(request, env) {
 }
 
 async function getPendingExchanges(request, env) {
-  if (!isAdmin(request, env)) return unauthorized(request);
+  if (!isReviewer(request, env)) return unauthorized(request);
   const url = new URL(request.url);
   const rawLimit = Number(url.searchParams.get("limit") || "50");
   const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
@@ -498,7 +504,7 @@ async function getPendingExchanges(request, env) {
   const after = Number(rawAfter);
   const rawThrough = url.searchParams.get("through");
   const status = url.searchParams.get("status") || "pending";
-  if (status !== "pending") {
+  if (!["pending", "approved", "rejected"].includes(status)) {
     return json({ ok: false, error: "Invalid status" }, 400, request);
   }
   if (
@@ -520,12 +526,13 @@ async function getPendingExchanges(request, env) {
       return json({ ok: false, error: "Invalid cursor" }, 400, request);
     }
     const page = await env.DB.prepare(
-      `SELECT id, exchange_description, status, submitted_at
+      `SELECT id, exchange_description, status, submitted_at,
+              reviewed_by, reviewed_at
        FROM exchange_submissions
-       WHERE status = 'pending' AND id > ? AND id <= ?
+       WHERE status = ? AND id > ? AND id <= ?
        ORDER BY id ASC
        LIMIT ?`
-    ).bind(after, through, limit + 1).all();
+    ).bind(status, after, through, limit + 1).all();
     const pageRows = page.results || [];
     const hasMore = pageRows.length > limit;
     const selected = pageRows.slice(0, limit);
@@ -536,6 +543,8 @@ async function getPendingExchanges(request, env) {
         exchangeDescription: row.exchange_description,
         status: row.status,
         submittedAt: row.submitted_at,
+        reviewedBy: row.reviewed_by || null,
+        reviewedAt: row.reviewed_at || null,
         items: [],
       },
     ]));
@@ -585,7 +594,7 @@ async function getPendingExchanges(request, env) {
 }
 
 async function getTrades(request, env) {
-  if (!isAdmin(request, env)) return unauthorized(request);
+  if (!isReviewer(request, env)) return unauthorized(request);
   const url = new URL(request.url);
   const rawLimit = Number(url.searchParams.get("limit") || "50");
   const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
@@ -595,11 +604,11 @@ async function getTrades(request, env) {
     return json({ ok: false, error: "Invalid status" }, 400, request);
   }
 
-  const isPendingQueue = status === "pending";
+  const isStatusQueue = Boolean(status);
   const rawAfter = url.searchParams.get("after") || "0";
   const rawThrough = url.searchParams.get("through");
   if (
-    isPendingQueue &&
+    isStatusQueue &&
     (
       !/^\d+$/.test(rawAfter) ||
       !Number.isSafeInteger(Number(rawAfter)) ||
@@ -615,7 +624,7 @@ async function getTrades(request, env) {
     const filters = [];
     const bindings = [];
     let through = null;
-    if (isPendingQueue) {
+    if (isStatusQueue) {
       through = rawThrough === null
         ? Number(
           (await env.DB.prepare(
@@ -626,24 +635,22 @@ async function getTrades(request, env) {
       if (!Number.isSafeInteger(through) || through < 0 || after > through) {
         return json({ ok: false, error: "Invalid cursor" }, 400, request);
       }
-      filters.push("status = 'pending'", "id > ?", "id <= ?");
-      bindings.push(after, through);
-    } else if (status) {
-      filters.push("status = ?");
-      bindings.push(status);
+      filters.push("status = ?", "id > ?", "id <= ?");
+      bindings.push(status, after, through);
     }
     const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
-    const pageSize = isPendingQueue ? limit + 1 : limit;
-    const order = isPendingQueue ? "ASC" : "DESC";
+    const pageSize = isStatusQueue ? limit + 1 : limit;
+    const order = isStatusQueue ? "ASC" : "DESC";
     const parentResult = await env.DB.prepare(
-      `SELECT id, trade_type, total_amount, status, submitted_at
+      `SELECT id, trade_type, total_amount, status, submitted_at,
+              reviewed_by, reviewed_at
        FROM trades
        ${where}
        ORDER BY id ${order}
        LIMIT ?`
     ).bind(...bindings, pageSize).all();
     const parentRows = parentResult.results || [];
-    const hasMore = isPendingQueue && parentRows.length > limit;
+    const hasMore = isStatusQueue && parentRows.length > limit;
     const selected = parentRows.slice(0, limit);
     const trades = new Map(selected.map((row) => [
       row.id,
@@ -653,6 +660,8 @@ async function getTrades(request, env) {
         totalPrice: row.total_amount,
         status: row.status,
         submittedAt: row.submitted_at,
+        reviewedBy: row.reviewed_by || null,
+        reviewedAt: row.reviewed_at || null,
         items: [],
       },
     ]));
@@ -705,7 +714,7 @@ async function getTrades(request, env) {
 }
 
 async function updateExchangeStatus(request, env, exchangeId) {
-  if (!isAdmin(request, env)) return unauthorized(request);
+  if (!isReviewer(request, env)) return unauthorized(request);
   if (!/^\d+$/.test(exchangeId)) {
     return json({ ok: false, error: "Invalid exchange id" }, 400, request);
   }
@@ -813,7 +822,7 @@ async function updateBlockedIp(request, env) {
 }
 
 async function updateTradeStatus(request, env, tradeId) {
-  if (!isAdmin(request, env)) return unauthorized(request);
+  if (!isReviewer(request, env)) return unauthorized(request);
   if (!/^\d+$/.test(tradeId)) {
     return json({ ok: false, error: "Invalid trade id" }, 400, request);
   }

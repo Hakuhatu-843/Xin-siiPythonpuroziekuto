@@ -141,13 +141,15 @@ function createExchangeEnvironment({ registeredCharacter = character } = {}) {
   return { DB: db, batches };
 }
 
-function createTradeReviewListEnvironment(count, itemCount = 3) {
+function createTradeReviewListEnvironment(count, itemCount = 3, status = "pending") {
   const trades = Array.from({ length: count }, (_, index) => ({
     id: index + 1,
     trade_type: "bundle",
     total_amount: 900,
-    status: "pending",
+    status,
     submitted_at: "2026-10-10T00:00:00Z",
+    reviewed_by: status === "pending" ? null : "reviewer-1",
+    reviewed_at: status === "pending" ? null : "2026-10-10T01:00:00Z",
   }));
   const items = trades.flatMap((trade) =>
     Array.from({ length: itemCount }, (_, index) => ({
@@ -178,10 +180,12 @@ function createTradeReviewListEnvironment(count, itemCount = 3) {
             return {
               async all() {
                 if (sql.includes("FROM trades") && sql.includes("ORDER BY id ASC")) {
-                  const [after, through, limit] = values;
+                  const [status, after, through, limit] = values;
                   return {
                     results: trades
-                      .filter((trade) => trade.id > after && trade.id <= through)
+                      .filter((trade) =>
+                        trade.status === status && trade.id > after && trade.id <= through
+                      )
                       .slice(0, limit),
                   };
                 }
@@ -221,12 +225,14 @@ function createTradeReviewListEnvironment(count, itemCount = 3) {
   };
 }
 
-function createExchangeReviewListEnvironment(count, itemCount = 3) {
+function createExchangeReviewListEnvironment(count, itemCount = 3, status = "pending") {
   const exchanges = Array.from({ length: count }, (_, index) => ({
     id: index + 1,
     exchange_description: `交換内容 ${index + 1}`,
-    status: "pending",
+    status,
     submitted_at: "2026-10-10T00:00:00Z",
+    reviewed_by: status === "pending" ? null : "reviewer-1",
+    reviewed_at: status === "pending" ? null : "2026-10-10T01:00:00Z",
   }));
   const items = exchanges.flatMap((exchange) =>
     Array.from({ length: itemCount }, (_, index) => ({
@@ -259,10 +265,14 @@ function createExchangeReviewListEnvironment(count, itemCount = 3) {
                   sql.includes("FROM exchange_submissions") &&
                   sql.includes("ORDER BY id ASC")
                 ) {
-                  const [after, through, limit] = values;
+                  const [status, after, through, limit] = values;
                   return {
                     results: exchanges
-                      .filter((exchange) => exchange.id > after && exchange.id <= through)
+                      .filter((exchange) =>
+                        exchange.status === status &&
+                        exchange.id > after &&
+                        exchange.id <= through
+                      )
                       .slice(0, limit),
                   };
                 }
@@ -351,6 +361,7 @@ test("allows CORS only for configured browser origins", async () => {
   );
   assert.equal(allowed.headers.get("Access-Control-Allow-Origin"), "https://hakuhatu-843.github.io");
   assert.equal(allowed.headers.get("Vary"), "Origin");
+  assert.match(allowed.headers.get("Access-Control-Allow-Headers"), /X-Review-Key/);
 
   const untrusted = await worker.fetch(
     new Request("https://worker.example/health", {
@@ -853,11 +864,11 @@ test("requires admin authentication to read exchange review items", async () => 
 test("returns pending exchange details only to authenticated reviewers", async () => {
   const env = {
     ...createExchangeReviewListEnvironment(1, 1),
-    ADMIN_KEY: "secret",
+    REVIEW_KEY: "review-secret",
   };
   const response = await worker.fetch(
     new Request("https://worker.example/exchanges?status=pending&limit=50", {
-      headers: { "X-Admin-Key": "secret" },
+      headers: { "X-Review-Key": "review-secret" },
     }),
     env,
   );
@@ -867,6 +878,92 @@ test("returns pending exchange details only to authenticated reviewers", async (
   assert.equal(body.exchanges[0].exchangeDescription, "交換内容 1");
   assert.equal(body.exchanges[0].items[0].characterNumber, "001");
   assert.equal("totalPrice" in body.exchanges[0], false);
+  assert.equal(body.hasMore, false);
+});
+
+test("review key can decide one submission but cannot use general admin APIs", async () => {
+  const batches = [];
+  const env = {
+    REVIEW_KEY: "review-secret",
+    DB: {
+      prepare(sql) {
+        return {
+          bind(...values) {
+            return { sql, values };
+          },
+        };
+      },
+      async batch(statements) {
+        batches.push(statements);
+        return [{ meta: { changes: 1 } }, { meta: { changes: 1 } }, { meta: { changes: 1 } }];
+      },
+    },
+  };
+  const decision = await worker.fetch(
+    new Request("https://worker.example/trades/7/status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Review-Key": "review-secret",
+      },
+      body: JSON.stringify({ status: "approved", reviewerId: "web-reviewer" }),
+    }),
+    env,
+  );
+  assert.equal(decision.status, 200);
+  assert.equal((await decision.json()).status, "approved");
+  assert.equal(batches.length, 1);
+
+  const blockedIpAdmin = await worker.fetch(
+    new Request("https://worker.example/admin/blocked-ips", {
+      headers: { "X-Review-Key": "review-secret" },
+    }),
+    env,
+  );
+  assert.equal(blockedIpAdmin.status, 401);
+});
+
+test("returns paged approved trade history with reviewer details", async () => {
+  const env = {
+    ...createTradeReviewListEnvironment(3, 1, "approved"),
+    ADMIN_KEY: "secret",
+  };
+  const response = await worker.fetch(
+    new Request("https://worker.example/trades?status=approved&limit=2", {
+      headers: { "X-Admin-Key": "secret" },
+    }),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.trades.map((trade) => trade.id), [1, 2]);
+  assert.ok(body.trades.every((trade) => trade.status === "approved"));
+  assert.equal(body.trades[0].reviewedBy, "reviewer-1");
+  assert.equal(body.trades[0].reviewedAt, "2026-10-10T01:00:00Z");
+  assert.equal(body.nextCursor, 2);
+  assert.equal(body.throughCursor, 3);
+  assert.equal(body.hasMore, true);
+});
+
+test("returns rejected exchange history with reviewer details", async () => {
+  const env = {
+    ...createExchangeReviewListEnvironment(1, 2, "rejected"),
+    ADMIN_KEY: "secret",
+  };
+  const response = await worker.fetch(
+    new Request("https://worker.example/exchanges?status=rejected", {
+      headers: { "X-Admin-Key": "secret" },
+    }),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.exchanges[0].status, "rejected");
+  assert.equal(body.exchanges[0].reviewedBy, "reviewer-1");
+  assert.equal(body.exchanges[0].reviewedAt, "2026-10-10T01:00:00Z");
+  assert.equal(body.exchanges[0].items.length, 2);
   assert.equal(body.hasMore, false);
 });
 
