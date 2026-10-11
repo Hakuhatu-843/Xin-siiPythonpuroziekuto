@@ -334,24 +334,22 @@ function back() {
 function startSubmitCooldown(btn) {
   submitCooldownUntil = Date.now() + 5000;
   if (submitCooldownTimer !== null) window.clearTimeout(submitCooldownTimer);
-  const originalLabel = t('送信する', 'Submit');
   const tick = () => {
     const remaining = Math.max(0, submitCooldownUntil - Date.now());
-    if (!btn.isConnected) {
-      if (remaining > 0) submitCooldownTimer = window.setTimeout(tick, Math.min(250, remaining));
-      else submitCooldownTimer = null;
-      return;
+    const currentButton = document.querySelector('[data-a="submit"]');
+    if (currentButton) {
+      if (remaining > 0) {
+        currentButton.disabled = true;
+        currentButton.textContent = `${t('送信する', 'Submit')} (${Math.ceil(remaining / 1000)}s)`;
+      } else {
+        currentButton.disabled = false;
+        currentButton.textContent = t('送信する', 'Submit');
+      }
     }
-    if (remaining > 0) {
-      btn.disabled = true;
-      btn.textContent = `${originalLabel} (${Math.ceil(remaining / 1000)}s)`;
-      submitCooldownTimer = window.setTimeout(tick, Math.min(250, remaining));
-    } else {
-      btn.disabled = false;
-      btn.textContent = originalLabel;
-      submitCooldownTimer = null;
-    }
+    if (remaining > 0) submitCooldownTimer = window.setTimeout(tick, Math.min(250, remaining));
+    else submitCooldownTimer = null;
   };
+  if (btn) btn.disabled = true;
   tick();
 }
 
