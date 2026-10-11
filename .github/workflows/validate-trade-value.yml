@@ -51,5 +51,13 @@ jobs:
           for table in ("trades", "trade_characters", "exchanges", "exchange_characters", "market_snapshots", "market_snapshot_mutations"):
               count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
               assert count == 0, f"Cleanup failed for {table}: {count} rows remain"
-          print(f"Migration checks passed: {tradeable} tradeable + {ancient} management-only characters; test data cleared.")
+          for table in ("trade_characters", "exchange_characters", "market_snapshots"):
+              columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+              required = {
+                  "trade_characters": {"direction"},
+                  "exchange_characters": {"direction"},
+                  "market_snapshots": {"acquired_count", "exchange_acquired_count", "given_count", "demand_delta"},
+              }[table]
+              assert required <= columns, f"Missing direction/demand columns in {table}: {required - columns}"
+          print(f"Migration checks passed: {tradeable} tradeable + {ancient} management-only characters; direction/demand schema verified; test data cleared.")
           PY
