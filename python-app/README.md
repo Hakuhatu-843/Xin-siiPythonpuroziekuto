@@ -44,10 +44,9 @@ Bot起動後、審査チャンネルで `/set_trade_review_channel` を実行し
 ## 市場コマンド
 
 - `/market`: Workerの正式キャラ一覧を読み込み、レアリティを選択してからキャラを選択し、市場スナップショットを表示します。Secretのように25体を超えるレアリティはページ切り替えに対応します。
-- `/character_number`: Workerのキャラ一覧を使い、英語名と番号の一覧を全体メッセージで表示します。25体ずつページ切り替えできます。
 - Botの番号・英語名・レアリティはWorkerの `/characters` を参照するため、Discord側に別の番号リストを持ちません。市場対象外の管理用キャラは表示対象から除外されます。
 
-価格不足、未登録番号、API障害、タイムアウトはユーザー向けエラーとして表示します。Workerの `/characters` と `/market-snapshot` が利用可能である必要があります。
+価格不足、未登録番号、API障害、タイムアウトはユーザー向けエラーとして表示します。Workerの `/characters` と `/market-snapshot` が利用可能である必要があります。Worker側のAPIコードを変更した場合は、GitHubへの反映だけでなく `worker` フォルダから `npx wrangler deploy` で本番Workerも更新してください。
 ## インストールして使う場合
 
 ```bash
