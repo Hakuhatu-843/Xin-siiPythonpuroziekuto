@@ -2117,12 +2117,28 @@ def create_bot() -> PythonAppBot:
             start_index = self.page * self.page_size
             entries = self.characters[start_index:start_index + self.page_size]
             page_count = max(1, (len(self.characters) + self.page_size - 1) // self.page_size)
+            rarity_ansi_colors = {
+                "common": "37",     # gray
+                "rare": "34",       # blue
+                "epic": "35",       # magenta
+                "legend": "33",     # yellow
+                "mythic": "91",     # bright red
+                "secret": "36",     # cyan
+                "ultimate": "93",   # bright yellow
+                "emperor": "95",    # bright magenta
+            }
+            colored_lines = [
+                (
+                    f"\\x1b[{rarity_ansi_colors.get(item.rarity, '37')}m"
+                    f"{item.character_number} — "
+                    f"{discord.utils.escape_markdown(item.english_name)}"
+                    f"\\x1b[0m"
+                )
+                for item in entries
+            ]
             embed = discord.Embed(
                 title=f"Character Number List ({self.page + 1}/{page_count})",
-                description="\n".join(
-                    f"{item.character_number} — {discord.utils.escape_markdown(item.english_name)}"
-                    for item in entries
-                ),
+                description="```ansi\\n" + "\\n".join(colored_lines) + "\\n```",
                 color=discord.Color.blurple(),
             )
             embed.set_footer(text=f"{len(self.characters)} tradable characters · Worker catalog")
