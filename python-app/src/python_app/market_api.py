@@ -216,3 +216,93 @@ def get_market_snapshot(
         raise MarketAPIError("Worker APIから不正なJSONレスポンスが返されました。") from error
 
     return _decode_snapshot(payload)
+
+
+@dataclass(frozen=True)
+class CharacterCatalogEntry:
+    """A tradable character returned by the canonical Worker catalog."""
+
+    character_number: str
+    english_name: str
+    japanese_name: str
+    rarity: str
+
+
+def get_characters(
+    *,
+    base_url: str = MARKET_API_BASE_URL,
+    timeout: float = MARKET_SNAPSHOT_TIMEOUT_SECONDS,
+) -> list[CharacterCatalogEntry]:
+    """Fetch the canonical character-number list from the Worker catalog."""
+    request = Request(
+        f"{base_url.rstrip('/')}/characters",
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "TradeValueDiscordBot/1.0",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        raise MarketAPIError(
+            f"Worker API が HTTP {error.code} を返しました（キャラ一覧）。"
+        ) from error
+    except TimeoutError as error:
+        raise MarketAPIError(
+            "Worker APIへの接続がタイムアウトしました。時間をおいて再度お試しください。"
+        ) from error
+    except URLError as error:
+        if isinstance(error.reason, TimeoutError):
+            raise MarketAPIError(
+                "Worker APIへの接続がタイムアウトしました。時間をおいて再度お試しください。"
+            ) from error
+        raise MarketAPIError(
+            "Worker APIに接続できませんでした。ネットワークを確認してください。"
+        ) from error
+    except OSError as error:
+        raise MarketAPIError(
+            "Worker APIに接続できませんでした。ネットワークを確認してください。"
+        ) from error
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise MarketAPIError("Worker APIから不正なJSONレスポンスが返されました。") from error
+
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        raise MarketAPIError("Worker APIのキャラ一覧レスポンスが不正です。")
+    rows = payload.get("characters")
+    if not isinstance(rows, list):
+        raise MarketAPIError("Worker APIのキャラ一覧が不正です。")
+
+    characters: list[CharacterCatalogEntry] = []
+    seen_numbers: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise MarketAPIError("Worker APIのキャラ情報が不正です。")
+        number = row.get("characterNumber")
+        english_name = row.get("englishName")
+        japanese_name = row.get("characterName")
+        rarity = row.get("rarity")
+        if (
+            not isinstance(number, str)
+            or re.fullmatch(r"\\d{3}", number) is None
+            or number in seen_numbers
+            or not isinstance(english_name, str)
+            or not english_name.strip()
+            or not isinstance(japanese_name, str)
+            or not japanese_name.strip()
+            or rarity not in {
+                "common", "rare", "epic", "legend", "mythic",
+                "secret", "ultimate", "emperor",
+            }
+        ):
+            raise MarketAPIError("Worker APIのキャラ情報に不正な項目があります。")
+        seen_numbers.add(number)
+        characters.append(
+            CharacterCatalogEntry(
+                character_number=number,
+                english_name=english_name.strip(),
+                japanese_name=japanese_name.strip(),
+                rarity=rarity,
+            )
+        )
+    return sorted(characters, key=lambda item: item.character_number)
