@@ -35,6 +35,10 @@ class MarketSnapshot:
     level1_value: float | None
     level_max_value: float | None
     demand_score: float | None
+    acquired_count: int | None
+    exchange_acquired_count: int | None
+    given_count: int | None
+    demand_delta: int | None
     sample_count: int
     level1_sample_count: int | None
     level_max_sample_count: int | None
@@ -73,6 +77,14 @@ def _optional_sample_count(value: object, field: str) -> int | None:
     if value is None:
         return None
     return _sample_count(value, field)
+
+
+def _optional_signed_count(value: object, field: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise MarketAPIError(f"Worker API の {field} が不正です。")
+    return value
 
 
 def _direction(value: object, field: str) -> str:
@@ -130,6 +142,10 @@ def _decode_snapshot(payload: object) -> MarketSnapshot:
             payload.get("levelMaxValue"), "levelMaxValue"
         ),
         demand_score=demand_score,
+        acquired_count=_optional_sample_count(payload.get("acquiredCount"), "acquiredCount"),
+        exchange_acquired_count=_optional_sample_count(payload.get("exchangeAcquiredCount"), "exchangeAcquiredCount"),
+        given_count=_optional_sample_count(payload.get("givenCount"), "givenCount"),
+        demand_delta=_optional_signed_count(payload.get("demandDelta"), "demandDelta"),
         sample_count=_sample_count(payload.get("sampleCount"), "sampleCount"),
         level1_sample_count=_optional_sample_count(
             payload.get("level1SampleCount"), "level1SampleCount"
