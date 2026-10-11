@@ -2208,7 +2208,7 @@ def create_bot() -> PythonAppBot:
         description="キャラクターの英語名と番号一覧を表示します。",
     )
     async def character_number(interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
         try:
             characters = await asyncio.to_thread(get_characters)
         except MarketAPIError as error:
