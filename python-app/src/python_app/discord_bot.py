@@ -15,7 +15,7 @@ from urllib.parse import quote
 import discord
 from discord import app_commands
 
-from .market_api import MarketAPIError, get_market_snapshot
+from .market_api import CharacterCatalogEntry, MarketAPIError, get_characters, get_market_snapshot
 from .character_names import (
     CharacterNameResolution,
     UnverifiedNameReview,
@@ -1921,63 +1921,18 @@ def create_bot() -> PythonAppBot:
             ephemeral=True,
         )
 
-    @bot.tree.command(
-        name="market",
-        description="最新の市場スナップショットを表示します。",
+    MARKET_RARITIES = (
+        ("common", "Common / コモン"),
+        ("rare", "Rare / レア"),
+        ("epic", "Epic / エピック"),
+        ("legend", "Legend / レジェンド"),
+        ("mythic", "Mythic / ミシック"),
+        ("secret", "Secret / シークレット"),
+        ("ultimate", "Ultimate / アルティメット"),
+        ("emperor", "Emperor / エンペラー"),
     )
-    @app_commands.describe(character="3桁のキャラクター番号（例: 001）または正式名称")
-    async def market(
-        interaction: discord.Interaction,
-        character: str,
-    ) -> None:
-        """Show the latest market snapshot from the Cloudflare Worker."""
-        await interaction.response.defer(ephemeral=True)
-        is_character_number = character.isascii() and character.isdigit()
-        if is_character_number and len(character) != 3:
-            await interaction.followup.send(
-                "キャラクター番号は3桁の数字で入力してください（例: 001）。",
-                ephemeral=True,
-            )
-            return
 
-        resolved_character_name: str | None = None
-        if not is_character_number:
-            try:
-                initialize_database()
-                with sqlite3.connect(DATABASE_PATH) as connection:
-                    resolution = resolve_character_name(connection, character)
-                    if not resolution.is_verified:
-                        await interaction.followup.send(
-                            "このキャラ名はまだ未確認です。管理者の確認後に相場計算の対象になります。",
-                            ephemeral=True,
-                        )
-                        return
-                    resolved_character_name = resolution.character_name
-            except sqlite3.Error:
-                logger.exception("キャラ名の確認に失敗しました。")
-                await interaction.followup.send(
-                    "キャラ名を確認できませんでした。時間をおいて再度お試しください。",
-                    ephemeral=True,
-                )
-                return
-
-        try:
-            snapshot = await asyncio.to_thread(
-                get_market_snapshot,
-                resolved_character_name,
-                character_number=character if is_character_number else None,
-            )
-        except MarketAPIError as error:
-            logger.warning(
-                "Workerから市場スナップショットを取得できませんでした: %s",
-                error,
-            )
-            await interaction.followup.send(
-                f"市場データを取得できませんでした。\n{error}",
-                ephemeral=True,
-            )
-            return
-
+    def format_market_snapshot(snapshot: object) -> str:
         def price_text(value: float | None) -> str:
             return "データ不足" if value is None else f"{value:,.0f}"
 
@@ -1988,63 +1943,286 @@ def create_bot() -> PythonAppBot:
                 if snapshot.character_number
                 else f"**{_escape_for_discord(snapshot.character_name)} の市場スナップショット**"
             ),
-            f"Lv.1価格: **{price_text(snapshot.level1_value)}** "
-            f"{snapshot.level1_direction}",
+            f"Lv.1価格: **{price_text(snapshot.level1_value)}** {snapshot.level1_direction}",
             (
                 f"Lv.1サンプル数: {snapshot.level1_sample_count}件"
                 if snapshot.level1_sample_count is not None
                 else "Lv.1サンプル数: 過去データでは未記録"
             ),
-            f"Lv.MAX価格: **{price_text(snapshot.level_max_value)}** "
-            f"{snapshot.level_max_direction}",
+            f"Lv.MAX価格: **{price_text(snapshot.level_max_value)}** {snapshot.level_max_direction}",
             (
                 f"Lv.MAXサンプル数: {snapshot.level_max_sample_count}件"
                 if snapshot.level_max_sample_count is not None
                 else "Lv.MAXサンプル数: 過去データでは未記録"
             ),
             (
-                f"需要度: **{snapshot.demand_score:.1f}/5.0** "
-                f"{snapshot.demand_direction}"
+                f"需要度: **{snapshot.demand_score:.1f}/5.0** {snapshot.demand_direction}"
                 if snapshot.demand_score is not None
                 else f"需要度: **データ不足** {snapshot.demand_direction}"
             ),
             "",
             "**変異倍率**",
         ]
-
         mutation_labels = {
-            "normal": "ノーマル",
-            "ノーマル": "ノーマル",
-            "silver": "シルバー",
-            "gold": "ゴールド",
-            "diamond": "ダイヤ",
-            "lava": "ラバ",
-            "galaxy": "ギャラ",
-            "aqua": "アクア",
-            "yggdrasil": "ユグ",
-            "halo": "ハロ",
+            "normal": "ノーマル", "ノーマル": "ノーマル",
+            "silver": "シルバー", "シルバー": "シルバー",
+            "gold": "ゴールド", "ゴールド": "ゴールド",
+            "diamond": "ダイヤ", "ダイヤ": "ダイヤ",
+            "lava": "ラバ", "ラバ": "ラバ",
+            "galaxy": "ギャラ", "ギャラ": "ギャラ",
+            "aqua": "アクア", "アクア": "アクア",
+            "yggdrasil": "ユグ", "ユグ": "ユグ",
+            "halo": "ハロ", "ハロ": "ハロ",
+            "halloween": "ハロウィン", "ハロウィン": "ハロウィン",
         }
         for mutation in snapshot.mutations:
             label = mutation_labels.get(mutation.mutation, mutation.mutation)
             multiplier_text = (
-                "データ不足"
-                if mutation.multiplier is None
+                "データ不足" if mutation.multiplier is None
                 else f"{mutation.multiplier:.2f}x"
             )
             lines.append(
-                f"{_escape_for_discord(label)}: **{multiplier_text}** "
-                f"{mutation.direction}"
+                f"{_escape_for_discord(label)}: **{multiplier_text}** {mutation.direction}"
+            )
+        lines.extend([
+            "",
+            f"需要対象取引: {snapshot.sample_count}件",
+            f"更新日時: {snapshot.created_at}",
+            "※ ↑上昇 / ↓下落 / →変化なし（または比較データなし）",
+        ])
+        return "\n".join(lines)
+
+    class MarketCharacterSelect(discord.ui.Select):
+        def __init__(self, parent_view: "MarketCharacterView") -> None:
+            self.parent_view = parent_view
+            start_index = parent_view.page * 25
+            page_characters = parent_view.characters[start_index:start_index + 25]
+            options = [
+                discord.SelectOption(
+                    label=f"{item.character_number} · {item.english_name}"[:100],
+                    value=item.character_number,
+                    description=f"{item.japanese_name} / {item.rarity}"[:100],
+                )
+                for item in page_characters
+            ]
+            super().__init__(
+                placeholder="キャラクターを選択",
+                min_values=1,
+                max_values=1,
+                options=options,
             )
 
-        lines.extend(
-            [
-                "",
-                f"需要対象取引: {snapshot.sample_count}件",
-                f"更新日時: {snapshot.created_at}",
-                "※ ↑上昇 / ↓下落 / →変化なし（または比較データなし）",
+        async def callback(self, interaction: discord.Interaction) -> None:
+            await self.parent_view.choose_character(interaction, self.values[0])
+
+    class MarketCharacterView(discord.ui.View):
+        def __init__(
+            self,
+            owner_id: int,
+            characters: list[CharacterCatalogEntry],
+            rarity: str,
+        ) -> None:
+            super().__init__(timeout=180)
+            self.owner_id = owner_id
+            self.characters = [item for item in characters if item.rarity == rarity]
+            self.rarity = rarity
+            self.page = 0
+            self.refresh_items()
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message(
+                    "この選択メニューを開いた人だけ操作できます。", ephemeral=True
+                )
+                return False
+            return True
+
+        def refresh_items(self) -> None:
+            self.clear_items()
+            self.add_item(MarketCharacterSelect(self))
+            if len(self.characters) > 25:
+                previous = discord.ui.Button(
+                    label="前へ", style=discord.ButtonStyle.secondary,
+                    disabled=self.page == 0,
+                )
+                next_button = discord.ui.Button(
+                    label="次へ", style=discord.ButtonStyle.secondary,
+                    disabled=(self.page + 1) * 25 >= len(self.characters),
+                )
+                previous.callback = self.go_previous
+                next_button.callback = self.go_next
+                self.add_item(previous)
+                self.add_item(next_button)
+
+        async def go_previous(self, interaction: discord.Interaction) -> None:
+            self.page = max(0, self.page - 1)
+            self.refresh_items()
+            await interaction.response.edit_message(content=self.prompt_text(), view=self)
+
+        async def go_next(self, interaction: discord.Interaction) -> None:
+            self.page = min((len(self.characters) - 1) // 25, self.page + 1)
+            self.refresh_items()
+            await interaction.response.edit_message(content=self.prompt_text(), view=self)
+
+        def prompt_text(self) -> str:
+            rarity_label = dict(MARKET_RARITIES).get(self.rarity, self.rarity)
+            page_count = max(1, (len(self.characters) + 24) // 25)
+            return (
+                f"レアリティ: **{rarity_label}** — キャラを選択してください。"
+                f"（{self.page + 1}/{page_count}ページ）"
+            )
+
+        async def choose_character(
+            self, interaction: discord.Interaction, character_number: str
+        ) -> None:
+            await interaction.response.edit_message(
+                content="相場データを取得しています…", view=None
+            )
+            try:
+                snapshot = await asyncio.to_thread(
+                    get_market_snapshot, None, character_number=character_number
+                )
+            except MarketAPIError as error:
+                await interaction.followup.send(
+                    f"市場データを取得できませんでした。\n{error}", ephemeral=True
+                )
+                return
+            await interaction.followup.send(
+                format_market_snapshot(snapshot), ephemeral=True
+            )
+
+    class MarketRaritySelect(discord.ui.Select):
+        def __init__(
+            self, owner_id: int, characters: list[CharacterCatalogEntry]
+        ) -> None:
+            self.owner_id = owner_id
+            self.characters = characters
+            options = [
+                discord.SelectOption(label=label, value=value)
+                for value, label in MARKET_RARITIES
+                if any(item.rarity == value for item in characters)
             ]
+            super().__init__(
+                placeholder="最初にレアリティを選択",
+                min_values=1,
+                max_values=1,
+                options=options,
+            )
+
+        async def callback(self, interaction: discord.Interaction) -> None:
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message(
+                    "この選択メニューを開いた人だけ操作できます。", ephemeral=True
+                )
+                return
+            rarity = self.values[0]
+            view = MarketCharacterView(self.owner_id, self.characters, rarity)
+            if not view.characters:
+                await interaction.response.edit_message(
+                    content="このレアリティのキャラは登録されていません。", view=None
+                )
+                return
+            await interaction.response.edit_message(
+                content=view.prompt_text(), view=view
+            )
+
+    class MarketRarityView(discord.ui.View):
+        def __init__(
+            self, owner_id: int, characters: list[CharacterCatalogEntry]
+        ) -> None:
+            super().__init__(timeout=180)
+            self.add_item(MarketRaritySelect(owner_id, characters))
+
+    class CharacterNumberListView(discord.ui.View):
+        def __init__(self, characters: list[CharacterCatalogEntry]) -> None:
+            super().__init__(timeout=600)
+            self.characters = characters
+            self.page = 0
+            self.page_size = 25
+            self.refresh_items()
+
+        def make_embed(self) -> discord.Embed:
+            start_index = self.page * self.page_size
+            entries = self.characters[start_index:start_index + self.page_size]
+            page_count = max(1, (len(self.characters) + self.page_size - 1) // self.page_size)
+            embed = discord.Embed(
+                title=f"Character Number List ({self.page + 1}/{page_count})",
+                description="\n".join(
+                    f"{item.character_number} — {discord.utils.escape_markdown(item.english_name)}"
+                    for item in entries
+                ),
+                color=discord.Color.blurple(),
+            )
+            embed.set_footer(text=f"{len(self.characters)} tradable characters · Worker catalog")
+            return embed
+
+        def refresh_items(self) -> None:
+            self.clear_items()
+            previous = discord.ui.Button(
+                label="前へ", style=discord.ButtonStyle.secondary,
+                disabled=self.page == 0,
+            )
+            next_button = discord.ui.Button(
+                label="次へ", style=discord.ButtonStyle.secondary,
+                disabled=(self.page + 1) * self.page_size >= len(self.characters),
+            )
+            previous.callback = self.go_previous
+            next_button.callback = self.go_next
+            self.add_item(previous)
+            self.add_item(next_button)
+
+        async def go_previous(self, interaction: discord.Interaction) -> None:
+            self.page = max(0, self.page - 1)
+            self.refresh_items()
+            await interaction.response.edit_message(embed=self.make_embed(), view=self)
+
+        async def go_next(self, interaction: discord.Interaction) -> None:
+            self.page = min((len(self.characters) - 1) // self.page_size, self.page + 1)
+            self.refresh_items()
+            await interaction.response.edit_message(embed=self.make_embed(), view=self)
+
+    @bot.tree.command(
+        name="market",
+        description="レアリティとキャラを選んで相場情報を表示します。",
+    )
+    async def market(interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            characters = await asyncio.to_thread(get_characters)
+        except MarketAPIError as error:
+            await interaction.followup.send(
+                f"キャラ一覧を取得できませんでした。\n{error}", ephemeral=True
+            )
+            return
+        if not characters:
+            await interaction.followup.send("Workerのキャラ一覧が空です。", ephemeral=True)
+            return
+        await interaction.followup.send(
+            "まずレアリティを選択してください。",
+            view=MarketRarityView(interaction.user.id, characters),
+            ephemeral=True,
         )
-        await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+    @bot.tree.command(
+        name="character_number",
+        description="キャラクターの英語名と番号一覧を表示します。",
+    )
+    async def character_number(interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            characters = await asyncio.to_thread(get_characters)
+        except MarketAPIError as error:
+            await interaction.followup.send(
+                f"キャラ一覧を取得できませんでした。\n{error}", ephemeral=True
+            )
+            return
+        if not characters:
+            await interaction.followup.send("Workerのキャラ一覧が空です。", ephemeral=True)
+            return
+        view = CharacterNumberListView(characters)
+        await interaction.followup.send(
+            embed=view.make_embed(), view=view, ephemeral=False
+        )
 
     @bot.tree.command(
         name="trades",
