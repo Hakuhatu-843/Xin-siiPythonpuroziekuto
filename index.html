@@ -72,7 +72,7 @@ details{margin:12px 0;color:var(--muted);font-size:13px;text-align:left}pre{over
 /* Form choices are loaded from the Worker; character numbers are not duplicated here. */
 const MASTER = {
   maxItems: 3,                                   // まとめ買い・セットの最大キャラクター数
-  levels: { min: 1, max: 301, presets: [1, 10, 50, 100, 200, 301] },
+  levels: { min: 1, max: 301, presets: [1, 31, 51, 100, 251, 301] },
   actions: [
     { id: 'sell', label: ['売り', 'Sell'], desc: ['自分がキャラクターを手放した取引', 'You gave away the character'] },
     { id: 'buy', label: ['買い', 'Buy'], desc: ['自分がキャラクターを入手した取引', 'You acquired the character'] },
@@ -206,7 +206,7 @@ const opt = (v, html, sel, st = '') => `<button type="button" class="opt" data-v
 const bar = (back = true, label = t('次へ', 'Next')) => `<div class="bar">${back ? `<button type="button" class="btn ghost" data-a="back">${t('戻る', 'Back')}</button>` : ''}<button type="button" class="btn primary" data-a="next">${label}</button></div>`;
 const head = (title, sub) => `${isMulti() && S.step !== 'type' ? `<span class="slot">${t('キャラクター', 'Character')} ${S.cur + 1} / ${M.maxItems}</span>` : ''}<h2>${title}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}`;
 const errP = '<p class="err" id="err" role="alert"></p>';
-const num = (f, val, hint) => `<div class="num"><button type="button" class="step" data-f="${f}" data-d="-1" aria-label="${t('1減らす', 'Decrease by 1')}">−</button><input class="txt" data-f="${f}" inputmode="numeric" autocomplete="off" value="${val}" placeholder="${hint}"><button type="button" class="step" data-f="${f}" data-d="1" aria-label="${t('1増やす', 'Increase by 1')}">＋</button></div>`;
+const num = (f, val, hint, step = 1) => `<div class="num"><button type="button" class="step" data-f="${f}" data-d="-${step}" aria-label="${t(`${step}減らす`, `Decrease by ${step}`)}">−${step}</button><input class="txt" data-f="${f}" inputmode="numeric" autocomplete="off" value="${val}" placeholder="${hint}"><button type="button" class="step" data-f="${f}" data-d="${step}" aria-label="${t(`${step}増やす`, `Increase by ${step}`)}">＋${step}</button></div>`;
 
 const VIEWS = {
   action: () => head(t('売り・買い・交換を選択', 'Choose sell, buy, or trade')) + `<div class="list">${M.actions.map(a => opt(a.id, `${tr(a.label)}<small>${tr(a.desc)}</small>`, S.action === a.id)).join('')}</div>` + errP + bar(false),
@@ -214,7 +214,7 @@ const VIEWS = {
   rarity: () => head(t('レアリティを選択', 'Choose rarity')) + `<div class="grid">${M.rarities.map(r => opt(r.id, tr(r.label), item().rarity === r.id, `--c:${r.color}`)).join('')}</div>` + errP + bar(),
   char: () => head(t('キャラクター番号を選択', 'Choose character number'), t(`${tr(byId(M.rarities, item().rarity).label)}のキャラクターのみ表示しています`, `Showing ${tr(byId(M.rarities, item().rarity).label)} characters only`)) +
     `<input class="txt" id="q" type="search" placeholder="${t('番号または名前で検索', 'Search number or name')}" value="${esc(S.q)}" autocomplete="off" aria-label="${t('キャラクター検索', 'Search characters')}"><div id="chars" class="grid c3"></div>` + errP + bar(),
-  level: () => head(t('レベルを入力', 'Enter level'), t('取引価格に影響するため必須です', 'Required to describe the trade.')) + num('level', item().level, `${L.min}–${L.max}`) +
+  level: () => head(t('レベルを入力', 'Enter level'), t('取引価格に影響するため必須です', 'Required to describe the trade.')) + num('level', item().level, `${L.min}–${L.max}`, 10) +
     `<div class="chips">${L.presets.map(p => `<button type="button" class="chip" data-p="${p}">Lv.${p}</button>`).join('')}</div>` + errP + bar(),
   mut: () => head(t('変異を選択', 'Choose mutation')) + `<div class="grid">${M.mutations.map(m => opt(m.id, tr(m.label), item().mut === m.id, `--c:${m.color}`)).join('')}</div>` + errP + bar(),
   qty: () => head(t('個数を入力', 'Enter quantity'), t('1以上の整数', 'Positive integer')) + num('qty', item().qty, '1') +
