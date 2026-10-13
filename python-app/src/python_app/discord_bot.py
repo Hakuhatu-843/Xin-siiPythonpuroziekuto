@@ -1881,15 +1881,78 @@ def create_bot() -> PythonAppBot:
     async def ping(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("Pong!")
 
+    class FeedbackModal(discord.ui.Modal, title="フィードバック送信"):
+        subject = discord.ui.TextInput(
+            label="タイトル",
+            placeholder="例: 相場表示をこうしてほしい",
+            max_length=100,
+        )
+        details = discord.ui.TextInput(
+            label="内容",
+            placeholder="改善案・不具合・要望などを入力してください",
+            style=discord.TextStyle.paragraph,
+            max_length=1500,
+        )
+
+        async def on_submit(self, interaction: discord.Interaction) -> None:
+            channel = interaction.channel
+            if channel is None or not hasattr(channel, "send"):
+                await interaction.response.send_message(
+                    "この場所ではフィードバックを投稿できません。サーバー内でお試しください。",
+                    ephemeral=True,
+                )
+                return
+            embed = discord.Embed(
+                title=f"フィードバック：{str(self.subject.value).strip()}",
+                description=str(self.details.value).strip(),
+                color=discord.Color.blurple(),
+                timestamp=datetime.now(timezone.utc),
+            )
+            embed.set_author(
+                name=f"{interaction.user.display_name} (@{interaction.user.name})",
+                icon_url=interaction.user.display_avatar.url,
+            )
+            try:
+                await channel.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                logger.exception("フィードバックの投稿に失敗しました。")
+                await interaction.response.send_message(
+                    "投稿できませんでした。Botのチャンネル送信権限を確認してください。",
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.send_message(
+                "フィードバックをチャンネルに投稿しました。ありがとう！",
+                ephemeral=True,
+            )
+
+    class FeedbackView(discord.ui.View):
+        def __init__(self) -> None:
+            super().__init__(timeout=1800)
+
+        @discord.ui.button(
+            label="フィードバックを送る",
+            style=discord.ButtonStyle.primary,
+            emoji="💬",
+        )
+        async def open_feedback(
+            self,
+            interaction: discord.Interaction,
+            button: discord.ui.Button[discord.ui.View],
+        ) -> None:
+            await interaction.response.send_modal(FeedbackModal())
+
     @bot.tree.command(
-        name="trade",
-        description="取引記入ボタンを表示します。",
+        name="feedback",
+        description="フィードバック送信用のボタンを表示します。",
     )
-    async def trade(interaction: discord.Interaction) -> None:
-        logger.info("/tradeを受信しました。")
+    async def feedback(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
-            "取引内容を入力する場合は、下のボタンを押してください。",
-            view=TradeEntryView(),
+            "改善案や不具合報告はこちらから送れます。送信した内容はこのチャンネルに公開されます。",
+            view=FeedbackView(),
         )
 
     MARKET_RARITIES = (
@@ -2136,26 +2199,6 @@ def create_bot() -> PythonAppBot:
         await interaction.followup.send(
             "まずレアリティを選択してください。",
             view=MarketRarityView(interaction.user.id, characters),
-            ephemeral=True,
-        )
-
-    @bot.tree.command(
-        name="trades",
-        description="最新20件の取引データを表示します。",
-    )
-    async def trades(interaction: discord.Interaction) -> None:
-        try:
-            recent_trades = get_recent_trades()
-        except sqlite3.Error:
-            logger.exception("取引データの読み込みに失敗しました。")
-            await interaction.response.send_message(
-                "取引データを読み込めませんでした。時間をおいて再度お試しください。",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.send_message(
-            embed=format_recent_trades(recent_trades),
             ephemeral=True,
         )
 
