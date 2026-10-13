@@ -1931,12 +1931,13 @@ def create_bot() -> PythonAppBot:
 
     class FeedbackView(discord.ui.View):
         def __init__(self) -> None:
-            super().__init__(timeout=1800)
+            super().__init__(timeout=None)
 
         @discord.ui.button(
             label="フィードバックを送る",
             style=discord.ButtonStyle.primary,
             emoji="💬",
+            custom_id="feedback:open_modal",
         )
         async def open_feedback(
             self,
@@ -1944,6 +1945,8 @@ def create_bot() -> PythonAppBot:
             button: discord.ui.Button[discord.ui.View],
         ) -> None:
             await interaction.response.send_modal(FeedbackModal())
+
+    bot.add_view(FeedbackView())
 
     @bot.tree.command(
         name="feedback",
